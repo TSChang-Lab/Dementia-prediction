@@ -1,0 +1,1657 @@
+---
+title: "1_data_preprocessing"
+author: "Joy_Fu"
+date: "2023-05-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+pacman::p_load(tidyverse, GenomicRanges, rtracklayer, bigsnpr, bigreadr, 
+               data.table, ieugwasr, MRutils)
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
+# Source in useful functions
+source("functions.R")
+```
+
+# Part 0. GWAS preprocessing
+Preprocessing of GWAS summary statistics, ran once
+## 1. AD Kunkle EUR
+```{r}
+sumstats_file = paste0(raw_data_path, 
+                       "sumstats/raw/Kunkle2019_AD_EUR_Stage1.txt.gz")
+sumstats = fread(sumstats_file)
+names(sumstats) = c("chr", "pos", "rsid", "a1", "a0", "beta", "se", "p")
+sumstats_clean = sumstats %>% filter(!is.na(chr) & !is.na(pos)) %>% 
+  mutate(p = as.numeric(p))
+dim(sumstats_clean) # dim = (11480632,8)
+write.table(sumstats_clean, file = paste0(raw_data_path, 'sumstats/fuma_upload/AD_Kunkle2019_EUR_hg19.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 2. AD Kunkle AFR
+```{r}
+sumstats_file = paste0(raw_data_path, 
+                       "sumstats/raw/Kunkle2020_AD_AA_META_Model1.txt.gz")
+sumstats = fread(sumstats_file)
+names(sumstats) = c("chr", "pos", "marker", "a1", "a0", 
+                    "beta", "se", "p", "a1_freq")
+sumstats_clean = sumstats %>% filter(!is.na(chr) & !is.na(pos))
+dim(sumstats_clean) # dim = (27724505,9)
+write.table(sumstats_clean, file = paste0(raw_data_path, 'sumstats/fuma_upload/AD_Kunkle2021_AFR_hg19.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 3. AD Jun Transethnic
+```{r}
+sumstats_file = paste0(raw_data_path, 
+                       "sumstats/raw/Jun2017_AD_Transethnic_META_ALL.sample.tbx.gz")
+sumstats = fread(sumstats_file)
+names(sumstats) = c("chr", "pos", "marker", "a1", "a0", "a1_freq", "freqse", 
+                    "beta", "se", "p", "direction", "hetchisq", "hetdf", "hetp")
+sumstats_clean = sumstats %>% filter(!is.na(chr) & !is.na(pos)) %>% 
+  mutate(a1 = toupper(a1), a0 = toupper(a0), p = as.numeric(p))
+dim(sumstats_clean) # dim = (7343832,14)
+write.table(sumstats_clean, 
+            file = paste0(raw_data_path, 
+                          'sumstats/fuma_upload/AD_Jun2017_Trans_hg19.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 4. LBD
+```{r}
+sumstats_file = paste0(raw_data_path, "sumstats/raw/Chia2021_LBD_EUR.txt.gz")
+sumstats = fread(sumstats_file) 
+names(sumstats) = c("chr", "pos", "rsid", "a1", "a0", "beta", "se", "p")
+sumstats_clean = sumstats %>% filter(!is.na(chr) & !is.na(pos)) 
+dim(sumstats_clean) # dim = (7827366,8)
+write.table(sumstats_clean, 
+            file = paste0(raw_data_path, 
+                          'sumstats/fuma_upload/LBD_Chia2021_hg19.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 5. PD
+```{r}
+sumstats_file = paste0(raw_data_path, 
+                       "sumstats/raw/Nalls2019_PD_EUR_excluding23andMe.tab.gz")
+sumstats = fread(sumstats_file)
+sumstats_add = sumstats %>% separate(col = "SNP", into = c("chr_pre", "pos"), 
+                                     sep = ":", remove = F) %>% 
+  mutate(chr = as.integer(substring(chr_pre, 4, last = 1000000L)), 
+         pos = as.integer(pos)) %>% 
+  mutate(N_total = N_cases + N_controls) %>% 
+  select(chr, pos, SNP, A1, A2, freq, b, se, p, N_cases, N_controls, N_total)
+names(sumstats_add) = c("chr", "pos", "marker", "a1", "a0", "a1_freq",
+                        "beta", "se", "p", "n_case", "n_control", "n_total")
+sumstats_clean = sumstats_add %>% filter(!is.na(pos) & !is.na(chr)) 
+dim(sumstats_clean) # dim = (17510617,12)
+write.table(sumstats_clean, 
+            file = paste0(raw_data_path, 
+                          'sumstats/fuma_upload/PD_Nalls2019_hg19.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 6. PSP
+```{bash}
+# Need some preprocess of the file first in the bash
+sed '/CN[0-9]/d' Chen2018_PSP_EUR.tab > Chen2018_PSP_EUR_rm.tab
+sed '/INS:/d' Chen2018_PSP_EUR_rm.tab > Chen2018_PSP_EUR_rm2.tab
+sed '/INV/d' Chen2018_PSP_EUR_rm2.tab > Chen2018_PSP_EUR_rm3.tab
+```
+
+```{r}
+sumstats_file = paste0(raw_data_path, "sumstats/raw/Chen2018_PSP_EUR_rm3.tab")
+sumstats = fread(sumstats_file)
+names(sumstats)[1] = "marker"
+names(sumstats)[3] = "pos"
+sumstats_clean = sumstats %>% 
+  mutate(rsid = case_when(
+    nchar(SNP) >= 3 ~ SNP
+  )) %>%  
+  select(CHR, pos, rsid, ALLELE1, ALLELE0, A1FREQ, BETA, SE, P_BOLT_LMM_INF) %>% 
+  filter(!is.na(CHR) & !is.na(pos)) 
+names(sumstats_clean) = c("chr", "pos", "rsid", "a1", "a0", "a1_freq", 
+                          "beta", "se", "p")
+dim(sumstats_clean) # dim = (6417560,9)
+write.table(sumstats_clean, 
+            file = paste0(raw_data_path, 
+                          'sumstats/fuma_upload/PSP_Chen2018_hg19.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 7. Stroke
+```{r}
+sumstats_file = paste0(raw_data_path, "sumstats/raw/MEGASTROKE.1.AS.TRANS.out")
+sumstats = fread(sumstats_file)
+names(sumstats) = c("rsid", "a1", "a0", "a1_freq", "beta", "se", "p")
+sumstats_clean = sumstats %>% filter(!is.na(rsid)) %>% 
+  mutate(a1 = toupper(a1), a0 = toupper(a0))
+dim(sumstats_clean) # dim = (7675830,7)
+write.table(sumstats_clean, 
+            file = paste0(raw_data_path, 
+                          'sumstats/fuma_upload/Stroke_MEGA_hg19.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+# Part 1. FUMA results cleaning
+## 1. Extract all candidate SNPs 
+```{r message=FALSE, warning=FALSE}
+rm(list = ls())
+lapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""), 
+       detach, character.only = TRUE, unload = TRUE)
+pacman::p_load(tidyverse, GenomicRanges, rtracklayer, bigsnpr, bigreadr, 
+               data.table, ieugwasr, MRutils)
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/functions.R")
+```
+
+### 1) AD Kunkle EUR
+```{r}
+# Full list of independent significant SNPs + LD SNPs (candidate SNPs, catch as many SNPs as we can from ATLAS)
+full_AD_EUR = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_EUR/snps.txt"), 
+                         header = T, sep = "\t", fill = T)
+lead_AD_EUR = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_EUR/leadsnps.txt"), 
+                         header = T, sep = "\t", fill = T)
+candi_AD_EUR = full_AD_EUR %>% filter(!is.na(gwasP)) %>% 
+  mutate(lead = if_else(rsID %in% lead_AD_EUR$rsID, 1, 0)) %>% 
+  mutate(phenotype = "AD_EUR") %>% 
+  select(chr, pos, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% unique()
+dim(candi_AD_EUR) # dim = (2040,15)
+```
+
+### 2) AD Kunkle AFR
+```{r}
+full_AD_AFR = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_AFR/snps.txt"), 
+                         header = T, sep = "\t", fill = T)
+lead_AD_AFR = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_AFR/leadsnps.txt"), 
+                         header = T, sep = "\t", fill = T)
+candi_AD_AFR = full_AD_AFR %>% filter(!is.na(gwasP)) %>% 
+  mutate(lead = if_else(rsID %in% lead_AD_AFR$rsID, 1, 0)) %>% 
+  mutate(phenotype = "AD_AFR") %>% 
+  select(chr, pos, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% unique()
+dim(candi_AD_AFR) # dim = (88,15)
+```
+
+### 3) AD Jun trans
+```{r}
+full_AD_trans = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_trans/snps.txt"), 
+                           header = T, sep = "\t", fill = T)
+lead_AD_trans = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_trans/leadsnps.txt"), 
+                           header = T, sep = "\t", fill = T)
+candi_AD_trans = full_AD_trans %>% filter(!is.na(gwasP)) %>% 
+  mutate(lead = if_else(rsID %in% lead_AD_trans$rsID, 1, 0)) %>% 
+  mutate(phenotype = "AD_trans") %>% 
+  select(chr, pos, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% unique()
+dim(candi_AD_trans) # dim = (780,15)
+```
+
+### 4) PD
+```{r}
+full_PD = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PD/snps.txt"), 
+                     header = T, sep = "\t", fill = T)
+lead_PD = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PD/leadsnps.txt"), 
+                     header = T, sep = "\t", fill = T)
+candi_PD = full_PD %>% filter(!is.na(gwasP)) %>% 
+  mutate(lead = if_else(rsID %in% lead_PD$rsID, 1, 0)) %>% 
+  mutate(phenotype = "PD") %>% 
+  select(chr, pos, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% unique()
+dim(candi_PD) # dim = (4716,15)
+```
+
+### 5) PSP
+```{r}
+full_PSP = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PSP/snps.txt"), 
+                     header = T, sep = "\t", fill = T)
+lead_PSP = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PSP/leadsnps.txt"), 
+                     header = T, sep = "\t", fill = T)
+candi_PSP = full_PSP %>% filter(!is.na(gwasP)) %>% 
+  mutate(lead = if_else(rsID %in% lead_PSP$rsID, 1, 0)) %>% 
+  mutate(phenotype = "PSP") %>% 
+  select(chr, pos, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% unique()
+dim(candi_PSP) # dim = (3815,15)
+```
+
+### 6) LBD
+```{r}
+full_LBD = read.table(file = paste0(raw_data_path, "FUMA/FUMA_LBD/snps.txt"), 
+                     header = T, sep = "\t", fill = T)
+lead_LBD = read.table(file = paste0(raw_data_path, "FUMA/FUMA_LBD/leadsnps.txt"), 
+                     header = T, sep = "\t", fill = T)
+candi_LBD = full_LBD %>% filter(!is.na(gwasP)) %>% 
+  mutate(lead = if_else(rsID %in% lead_LBD$rsID, 1, 0)) %>% 
+  mutate(phenotype = "LBD") %>% 
+  select(chr, pos, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% unique()
+dim(candi_LBD) # dim = (398,15)
+```
+
+### 7) STROKE
+```{r}
+full_STROKE = read.table(file = paste0(raw_data_path, "FUMA/FUMA_STROKE/snps.txt"), 
+                     header = T, sep = "\t", fill = T)
+lead_STROKE = read.table(file = paste0(raw_data_path, "FUMA/FUMA_STROKE/leadsnps.txt"), 
+                     header = T, sep = "\t", fill = T)
+candi_STROKE = full_STROKE %>% filter(!is.na(gwasP)) %>% 
+  mutate(lead = if_else(rsID %in% lead_STROKE$rsID, 1, 0)) %>% 
+  mutate(phenotype = "STROKE") %>% 
+  select(chr, pos, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% unique()
+dim(candi_STROKE) # dim = (843,15)
+```
+
+## 2. Cleaning (liftover + annotation)
+```{r}
+candi_full = rbind(candi_AD_EUR, candi_AD_AFR, candi_AD_trans, candi_PD, 
+                   candi_PSP, candi_LBD, candi_STROKE) %>% as.data.frame() %>% 
+  mutate(index = seq(1, nrow(.)))
+# liftover
+chain_file = import.chain("hg19ToHg38.over.chain")
+# Prepare Genomic Ranges
+hg19.gr = GRanges(
+  seqname = paste("chr", candi_full$chr, sep = ""),
+  ranges = IRanges(start = as.numeric(candi_full$pos), 
+                   end = as.numeric(candi_full$pos)),
+  snp.name = candi_full$rsID)
+candi_hg38_liftover = as.data.frame(liftOver(hg19.gr, chain_file)) %>% 
+  mutate(chr = as.integer(substring(seqnames, 4, last = 1000000L))) %>% 
+  select(group, chr, start) %>% unique() %>% drop_na()
+liftover_full = candi_full %>% 
+  left_join(candi_hg38_liftover, by = c("index" = "group", "chr" = "chr")) %>% 
+  select(chr, start, rsID, non_effect_allele, effect_allele, beta, gwasP, IndSigSNP, 
+         func, CADD, posMapFilt, eqtlMapFilt, ciMapFilt, lead, phenotype) %>% 
+  dplyr::rename(pos = start, a0 = non_effect_allele, a1 = effect_allele) %>% 
+  filter(!is.na(chr) & !is.na(pos)) %>% unique()
+dim(liftover_full) # dim = 12658,15
+```
+
+## 3. Extract and clean ATLAS data -- Server step
+```{r}
+liftover_full = liftover_full %>% 
+  mutate(chr_pos_name1 = paste0("chr", chr, ":", pos, ":", a0, ":", a1),
+         chr_pos_name2 = paste0("chr", chr, ":", pos, ":", a1, ":", a0))
+name1_out = liftover_full %>% pull(chr_pos_name1) %>% unique()
+name2_out = liftover_full %>% pull(chr_pos_name2) %>% unique()
+name_out_full = c(name1_out, name2_out) %>% unique()
+length(name_out_full) # length = 18712
+# Write output for snp extraction on server
+write.table(name_out_full, 
+            file = paste0(raw_data_path, "FUMA/candidate_snps/full_out_wdup.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = F)
+# Read in the QCed genotype and sumstats files + preprocess the bed file (only need to do once for each data set)
+geno_file = paste0(raw_data_path, 'atlas/geno/full.combine')
+# snp_readBed(paste0(geno_file, '.bed'))
+obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
+# extract the SNP information from the genotype
+map = obj.bigSNP$map[-3]
+names(map) = c("chr", "rsid", "pos", "a1", "a0")
+# Get fam order
+fam.order = as.data.table(obj.bigSNP$fam)
+# get genotype info
+genotype = obj.bigSNP$genotypes
+genotype.targ = snp_fastImputeSimple(obj.bigSNP$genotypes, method = 'mean2') 
+genotype_df = as.matrix(genotype.targ[])[,] %>% as.data.frame() 
+colnames(genotype_df) = map$rsid
+dim(genotype_df) # 57483,5708
+```
+
+# Part 2. Finalize datasets
+## 1. AD EUR
+```{r}
+snp_AD_EUR = liftover_full %>% filter(phenotype == "AD_EUR") %>% 
+  mutate(ind_sig = if_else(rsID == IndSigSNP, 1, 0)) %>% filter(!is.na(beta)) %>% 
+  mutate(map_yes = case_when(
+    posMapFilt == 1 | eqtlMapFilt == 1 | ciMapFilt == 1 ~ 1,
+    TRUE ~ 0
+  )) %>% select(chr, pos, a1, a0, beta, gwasP, rsID, IndSigSNP, 
+                ind_sig, lead, map_yes, CADD) %>% unique()
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_EUR = snp_match(snp_AD_EUR, map) # 1546 variants have been matched
+```
+
+### A. Independent significant SNPs 
+```{r}
+final_extract1 = info_snp_AD_EUR %>% filter(ind_sig == 1) %>% unique() # N = 122
+final_extract2 = info_snp_AD_EUR %>% filter(ind_sig == 0) %>% 
+  filter(IndSigSNP %!in% final_extract1$IndSigSNP) %>% 
+  group_by(IndSigSNP) %>% arrange(gwasP) %>% mutate(order = row_number()) %>% 
+  filter(order == 1) %>% select(-order) %>% filter(gwasP < 5e-8)
+indsig_AD_EUR_final = rbind(final_extract1, final_extract2) %>% unique() %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(indsig_AD_EUR_final) # dim = (147,8)
+# Remap to get final
+info_snp = snp_match(indsig_AD_EUR_final, map) # 147 variants have been matched
+indsig_beta_AD_EUR = info_snp$beta
+AD_EUR_beta_indsig = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_EUR_indsig = beta)
+# Filter genotype info
+genotype.targ.indsig = genotype_df %>% select(all_of(AD_EUR_beta_indsig$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% indsig_beta_AD_EUR
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_EUR_indsig', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_EUR_indsig)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_EUR_indsig)
+# Apply to ATLAS
+AD_EUR_prs_indsig = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_EUR_prs_indsig) # dim = (54935,3)
+AD_EUR_prs_indsig$AD_PRS_EUR_indsig_norm = 
+  (AD_EUR_prs_indsig$AD_PRS_EUR_indsig - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_EUR_prs_indsig = AD_EUR_prs_indsig %>% 
+  select(IID, AD_PRS_EUR_indsig, AD_PRS_EUR_indsig_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### B. Lead SNPs
+```{r}
+final_extract = info_snp_AD_EUR %>% filter(lead == 1) %>% unique() # N = 39
+lead_AD_EUR_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(lead_AD_EUR_final) # dim = (39,8)
+# Remap to get final
+info_snp = snp_match(lead_AD_EUR_final, map) # 39 variants have been matched
+lead_beta_AD_EUR = info_snp$beta
+AD_EUR_beta_lead = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_EUR_lead = beta)
+# Filter genotype info
+genotype.targ.lead = genotype_df %>% select(all_of(AD_EUR_beta_lead$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.lead[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% lead_beta_AD_EUR
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_EUR_lead', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_EUR_lead)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_EUR_lead)
+# Apply to ATLAS
+AD_EUR_prs_lead = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_EUR_prs_lead) # dim = (54935,3)
+AD_EUR_prs_lead$AD_PRS_EUR_lead_norm = 
+  (AD_EUR_prs_lead$AD_PRS_EUR_lead - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_EUR_prs_lead = AD_EUR_prs_lead %>% 
+  select(IID, AD_PRS_EUR_lead, AD_PRS_EUR_lead_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### C. Mapped SNPs
+```{r}
+final_extract = info_snp_AD_EUR %>% filter(map_yes == 1) %>% 
+  group_by(IndSigSNP) %>% arrange(desc(CADD)) %>% 
+  mutate(order = row_number()) %>% filter(order == 1) %>% 
+  select(-order) %>% ungroup()
+map_AD_EUR_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(map_AD_EUR_final) # dim = (147,8)
+# Remap to get final
+info_snp = snp_match(map_AD_EUR_final, map) # 147 variants have been matched
+map_beta_AD_EUR = info_snp$beta
+AD_EUR_beta_map = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_EUR_map = beta)
+# Filter genotype info
+genotype.targ.map = genotype_df %>% select(all_of(AD_EUR_beta_map$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.map[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% map_beta_AD_EUR
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_EUR_map', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_EUR_map)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_EUR_map)
+# Apply to ATLAS
+AD_EUR_prs_map = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_EUR_prs_map) # dim = (54935,3)
+AD_EUR_prs_map$AD_PRS_EUR_map_norm = 
+  (AD_EUR_prs_map$AD_PRS_EUR_map - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_EUR_prs_map = AD_EUR_prs_map %>% 
+  select(IID, AD_PRS_EUR_map, AD_PRS_EUR_map_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### Combine all AD EUR PRSs
+```{r}
+AD_Kunkle_EUR_prs = AD_EUR_prs_indsig %>% 
+  inner_join(AD_EUR_prs_lead) %>% inner_join(AD_EUR_prs_map)
+AD_Kunkle_EUR_beta = AD_EUR_beta_indsig %>% full_join(AD_EUR_beta_lead) %>% 
+  full_join(AD_EUR_beta_map) %>% select(-gwasP)
+save(AD_Kunkle_EUR_prs, file = paste0(raw_data_path, "prs/raw/AD_Kunkle_EUR_prs.rda"))
+save(AD_Kunkle_EUR_beta, file = paste0(raw_data_path, "prs/raw/AD_Kunkle_EUR_beta.rda"))
+```
+
+## 2. AD AFR
+```{r}
+snp_AD_AFR = liftover_full %>% filter(phenotype == "AD_AFR") %>% 
+  mutate(ind_sig = if_else(rsID == IndSigSNP, 1, 0)) %>% filter(!is.na(beta)) %>% 
+  mutate(map_yes = case_when(
+    posMapFilt == 1 | eqtlMapFilt == 1 | ciMapFilt == 1 ~ 1,
+    TRUE ~ 0
+  )) %>% select(chr, pos, a1, a0, beta, gwasP, rsID, IndSigSNP, 
+                ind_sig, lead, map_yes, CADD) %>% unique()
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_AFR = snp_match(snp_AD_AFR, map) # 74 variants have been matched
+```
+
+### A. Independent significant SNPs 
+```{r}
+final_extract1 = info_snp_AD_AFR %>% filter(ind_sig == 1) %>% unique() # N = 20
+final_extract2 = info_snp_AD_AFR %>% filter(ind_sig == 0) %>% 
+  filter(IndSigSNP %!in% final_extract1$IndSigSNP) %>% 
+  group_by(IndSigSNP) %>% arrange(gwasP) %>% mutate(order = row_number()) %>% 
+  filter(order == 1) %>% select(-order) %>% filter(gwasP < 5e-8)
+indsig_AD_AFR_final = rbind(final_extract1, final_extract2) %>% unique() %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(indsig_AD_AFR_final) # dim = (21,8)
+# Remap to get final
+info_snp = snp_match(indsig_AD_AFR_final, map) # 21 variants have been matched
+indsig_beta_AD_AFR = info_snp$beta
+AD_AFR_beta_indsig = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_AFR_indsig = beta)
+# Filter genotype info
+genotype.targ.indsig = genotype_df %>% select(all_of(AD_AFR_beta_indsig$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% indsig_beta_AD_AFR
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_AFR_indsig', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_AFR_indsig)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_AFR_indsig)
+# Apply to ATLAS
+AD_AFR_prs_indsig = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_AFR_prs_indsig) # dim = (54935,3)
+AD_AFR_prs_indsig$AD_PRS_AFR_indsig_norm = 
+  (AD_AFR_prs_indsig$AD_PRS_AFR_indsig - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_AFR_prs_indsig = AD_AFR_prs_indsig %>% 
+  select(IID, AD_PRS_AFR_indsig, AD_PRS_AFR_indsig_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### B. Lead SNPs
+```{r}
+final_extract = info_snp_AD_AFR %>% filter(lead == 1) %>% unique() # N = 5
+lead_AD_AFR_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(lead_AD_AFR_final) # dim = (5,8)
+# Remap to get final
+info_snp = snp_match(lead_AD_AFR_final, map) # 5 variants have been matched
+lead_beta_AD_AFR = info_snp$beta
+AD_AFR_beta_lead = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_AFR_lead = beta)
+# Filter genotype info
+genotype.targ.lead = genotype_df %>% select(all_of(AD_AFR_beta_lead$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.lead[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% lead_beta_AD_AFR
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_AFR_lead', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_AFR_lead)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_AFR_lead)
+# Apply to ATLAS
+AD_AFR_prs_lead = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_AFR_prs_lead) # dim = (54935,3)
+AD_AFR_prs_lead$AD_PRS_AFR_lead_norm = 
+  (AD_AFR_prs_lead$AD_PRS_AFR_lead - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_AFR_prs_lead = AD_AFR_prs_lead %>% 
+  select(IID, AD_PRS_AFR_lead, AD_PRS_AFR_lead_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### C. Mapped SNPs
+```{r}
+final_extract = info_snp_AD_AFR %>% filter(map_yes == 1) %>% 
+  group_by(IndSigSNP) %>% arrange(desc(CADD)) %>% 
+  mutate(order = row_number()) %>% filter(order == 1) %>% 
+  select(-order) %>% ungroup()
+map_AD_AFR_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(map_AD_AFR_final) # dim = (22,8)
+# Remap to get final
+info_snp = snp_match(map_AD_AFR_final, map) # 22 variants have been matched
+map_beta_AD_AFR = info_snp$beta
+AD_AFR_beta_map = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_AFR_map = beta)
+# Filter genotype info
+genotype.targ.map = genotype_df %>% select(all_of(AD_AFR_beta_map$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.map[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% map_beta_AD_AFR
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_AFR_map', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_AFR_map)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_AFR_map)
+# Apply to ATLAS
+AD_AFR_prs_map = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_AFR_prs_map) # dim = (54935,3)
+AD_AFR_prs_map$AD_PRS_AFR_map_norm = 
+  (AD_AFR_prs_map$AD_PRS_AFR_map - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_AFR_prs_map = AD_AFR_prs_map %>% 
+  select(IID, AD_PRS_AFR_map, AD_PRS_AFR_map_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### Combine all AD AFR PRSs
+```{r}
+AD_Kunkle_AFR_prs = AD_AFR_prs_indsig %>% 
+  inner_join(AD_AFR_prs_lead) %>% inner_join(AD_AFR_prs_map)
+AD_Kunkle_AFR_beta = AD_AFR_beta_indsig %>% full_join(AD_AFR_beta_lead) %>% 
+  full_join(AD_AFR_beta_map) %>% select(-gwasP)
+save(AD_Kunkle_AFR_prs, file = paste0(raw_data_path, "prs/raw/AD_Kunkle_AFR_prs.rda"))
+save(AD_Kunkle_AFR_beta, file = paste0(raw_data_path, "prs/raw/AD_Kunkle_AFR_beta.rda"))
+```
+
+## 3. AD trans
+```{r}
+snp_AD_trans = liftover_full %>% filter(phenotype == "AD_trans") %>% 
+  mutate(ind_sig = if_else(rsID == IndSigSNP, 1, 0)) %>% filter(!is.na(beta)) %>% 
+  mutate(map_yes = case_when(
+    posMapFilt == 1 | eqtlMapFilt == 1 | ciMapFilt == 1 ~ 1,
+    TRUE ~ 0
+  )) %>% select(chr, pos, a1, a0, beta, gwasP, rsID, IndSigSNP, 
+                ind_sig, lead, map_yes, CADD) %>% unique()
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_trans = snp_match(snp_AD_trans, map) # 629 variants have been matched
+```
+
+### A. Independent significant SNPs 
+```{r}
+final_extract1 = info_snp_AD_trans %>% filter(ind_sig == 1) %>% unique() # N = 112
+final_extract2 = info_snp_AD_trans %>% filter(ind_sig == 0) %>% 
+  filter(IndSigSNP %!in% final_extract1$IndSigSNP) %>% 
+  group_by(IndSigSNP) %>% arrange(gwasP) %>% mutate(order = row_number()) %>% 
+  filter(order == 1) %>% select(-order) %>% filter(gwasP < 5e-8)
+indsig_AD_trans_final = rbind(final_extract1, final_extract2) %>% unique() %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(indsig_AD_trans_final) # dim = (127,8)
+# Remap to get final
+info_snp = snp_match(indsig_AD_trans_final, map) # 127 variants have been matched
+indsig_beta_AD_trans = info_snp$beta
+AD_trans_beta_indsig = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_trans_indsig = beta)
+# Filter genotype info
+genotype.targ.indsig = genotype_df %>% select(all_of(AD_trans_beta_indsig$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% indsig_beta_AD_trans
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_trans_indsig', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_trans_indsig)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_trans_indsig)
+# Apply to ATLAS
+AD_trans_prs_indsig = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_trans_prs_indsig) # dim = (54935,3)
+AD_trans_prs_indsig$AD_PRS_trans_indsig_norm = 
+  (AD_trans_prs_indsig$AD_PRS_trans_indsig - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_trans_prs_indsig = AD_trans_prs_indsig %>% 
+  select(IID, AD_PRS_trans_indsig, AD_PRS_trans_indsig_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### B. Lead SNPs
+```{r}
+final_extract = info_snp_AD_trans %>% filter(lead == 1) %>% unique() # N = 37
+lead_AD_trans_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(lead_AD_trans_final) # dim = (37,8)
+# Remap to get final
+info_snp = snp_match(lead_AD_trans_final, map) # 37 variants have been matched
+lead_beta_AD_trans = info_snp$beta
+AD_trans_beta_lead = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_trans_lead = beta)
+# Filter genotype info
+genotype.targ.lead = genotype_df %>% select(all_of(AD_trans_beta_lead$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.lead[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% lead_beta_AD_trans
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_trans_lead', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_trans_lead)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_trans_lead)
+# Apply to ATLAS
+AD_trans_prs_lead = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_trans_prs_lead) # dim = (54935,3)
+AD_trans_prs_lead$AD_PRS_trans_lead_norm = 
+  (AD_trans_prs_lead$AD_PRS_trans_lead - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_trans_prs_lead = AD_trans_prs_lead %>% 
+  select(IID, AD_PRS_trans_lead, AD_PRS_trans_lead_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### C. Mapped SNPs
+```{r}
+final_extract = info_snp_AD_trans %>% filter(map_yes == 1) %>% 
+  group_by(IndSigSNP) %>% arrange(desc(CADD)) %>% 
+  mutate(order = row_number()) %>% filter(order == 1) %>% 
+  select(-order) %>% ungroup()
+map_AD_trans_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(map_AD_trans_final) # dim = (123,8)
+# Remap to get final
+info_snp = snp_match(map_AD_trans_final, map) # 123 variants have been matched
+map_beta_AD_trans = info_snp$beta
+AD_trans_beta_map = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_trans_map = beta)
+# Filter genotype info
+genotype.targ.map = genotype_df %>% select(all_of(AD_trans_beta_map$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.map[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% map_beta_AD_trans
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('AD_PRS_trans_map', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_trans_map)
+AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_trans_map)
+# Apply to ATLAS
+AD_trans_prs_map = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(AD_trans_prs_map) # dim = (54935,3)
+AD_trans_prs_map$AD_PRS_trans_map_norm = 
+  (AD_trans_prs_map$AD_PRS_trans_map - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+AD_trans_prs_map = AD_trans_prs_map %>% 
+  select(IID, AD_PRS_trans_map, AD_PRS_trans_map_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### Combine all AD trans PRSs
+```{r}
+AD_Jun_trans_prs = AD_trans_prs_indsig %>% 
+  inner_join(AD_trans_prs_lead) %>% inner_join(AD_trans_prs_map)
+AD_Jun_trans_beta = AD_trans_beta_indsig %>% full_join(AD_trans_beta_lead) %>% 
+  full_join(AD_trans_beta_map) %>% select(-gwasP)
+save(AD_Jun_trans_prs, file = paste0(raw_data_path, "prs/raw/AD_Jun_trans_prs.rda"))
+save(AD_Jun_trans_beta, file = paste0(raw_data_path, "prs/raw/AD_Jun_trans_beta.rda"))
+```
+
+## 4. LBD
+```{r}
+snp_LBD = liftover_full %>% filter(phenotype == "LBD") %>% 
+  mutate(ind_sig = if_else(rsID == IndSigSNP, 1, 0)) %>% filter(!is.na(beta)) %>% 
+  mutate(map_yes = case_when(
+    posMapFilt == 1 | eqtlMapFilt == 1 | ciMapFilt == 1 ~ 1,
+    TRUE ~ 0
+  )) %>% select(chr, pos, a1, a0, beta, gwasP, rsID, IndSigSNP, 
+                ind_sig, lead, map_yes, CADD) %>% unique()
+# Reverse beta if necessary by performing SNP matching
+info_snp_LBD = snp_match(snp_LBD, map) # 304 variants have been matched
+```
+
+### A. Independent significant SNPs 
+```{r}
+final_extract1 = info_snp_LBD %>% filter(ind_sig == 1) %>% unique() # N = 17
+final_extract2 = info_snp_LBD %>% filter(ind_sig == 0) %>% 
+  filter(IndSigSNP %!in% final_extract1$IndSigSNP) %>% 
+  group_by(IndSigSNP) %>% arrange(gwasP) %>% mutate(order = row_number()) %>% 
+  filter(order == 1) %>% select(-order) %>% filter(gwasP < 5e-8)
+indsig_LBD_final = rbind(final_extract1, final_extract2) %>% unique() %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(indsig_LBD_final) # dim = (21,8)
+# Remap to get final
+info_snp = snp_match(indsig_LBD_final, map) # 21 variants have been matched
+indsig_beta_LBD = info_snp$beta
+LBD_beta_indsig = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_LBD_indsig = beta)
+# Filter genotype info
+genotype.targ.indsig = genotype_df %>% select(all_of(LBD_beta_indsig$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% indsig_beta_LBD
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('LBD_PRS_indsig', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+LBD_1kg_mean = mean(onekg_EUR$LBD_PRS_indsig)
+LBD_1kg_sd = sd(onekg_EUR$LBD_PRS_indsig)
+# Apply to ATLAS
+LBD_prs_indsig = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(LBD_prs_indsig) # dim = (54935,3)
+LBD_prs_indsig$LBD_PRS_indsig_norm = 
+  (LBD_prs_indsig$LBD_PRS_indsig - LBD_1kg_mean) / LBD_1kg_sd
+LBD_prs_indsig = LBD_prs_indsig %>% 
+  select(IID, LBD_PRS_indsig, LBD_PRS_indsig_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### B. Lead SNPs
+```{r}
+final_extract = info_snp_LBD %>% filter(lead == 1) %>% unique() # N = 7
+lead_LBD_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(lead_LBD_final) # dim = (7,8)
+# Remap to get final
+info_snp = snp_match(lead_LBD_final, map) # 7 variants have been matched
+lead_beta_LBD = info_snp$beta
+LBD_beta_lead = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_LBD_lead = beta)
+# Filter genotype info
+genotype.targ.lead = genotype_df %>% select(all_of(LBD_beta_lead$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.lead[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% lead_beta_LBD
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('LBD_PRS_lead', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+LBD_1kg_mean = mean(onekg_EUR$LBD_PRS_lead)
+LBD_1kg_sd = sd(onekg_EUR$LBD_PRS_lead)
+# Apply to ATLAS
+LBD_prs_lead = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(LBD_prs_lead) # dim = (54935,3)
+LBD_prs_lead$LBD_PRS_lead_norm = 
+  (LBD_prs_lead$LBD_PRS_lead - LBD_1kg_mean) / LBD_1kg_sd
+LBD_prs_lead = LBD_prs_lead %>% 
+  select(IID, LBD_PRS_lead, LBD_PRS_lead_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### C. Mapped SNPs
+```{r}
+final_extract = info_snp_LBD %>% filter(map_yes == 1) %>% 
+  group_by(IndSigSNP) %>% arrange(desc(CADD)) %>% 
+  mutate(order = row_number()) %>% filter(order == 1) %>% 
+  select(-order) %>% ungroup()
+map_LBD_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(map_LBD_final) # dim = (21,8)
+# Remap to get final
+info_snp = snp_match(map_LBD_final, map) # 21 variants have been matched
+map_beta_LBD = info_snp$beta
+LBD_beta_map = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_LBD_map = beta)
+# Filter genotype info
+genotype.targ.map = genotype_df %>% select(all_of(LBD_beta_map$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.map[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% map_beta_LBD
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('LBD_PRS_map', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+LBD_1kg_mean = mean(onekg_EUR$LBD_PRS_map)
+LBD_1kg_sd = sd(onekg_EUR$LBD_PRS_map)
+# Apply to ATLAS
+LBD_prs_map = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(LBD_prs_map) # dim = (54935,3)
+LBD_prs_map$LBD_PRS_map_norm = 
+  (LBD_prs_map$LBD_PRS_map - LBD_1kg_mean) / LBD_1kg_sd
+LBD_prs_map = LBD_prs_map %>% 
+  select(IID, LBD_PRS_map, LBD_PRS_map_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### Combine all LBD PRSs
+```{r}
+LBD_prs = LBD_prs_indsig %>% 
+  inner_join(LBD_prs_lead) %>% inner_join(LBD_prs_map)
+LBD_beta = LBD_beta_indsig %>% full_join(LBD_beta_lead) %>% 
+  full_join(LBD_beta_map) %>% select(-gwasP)
+save(LBD_prs, file = paste0(raw_data_path, "prs/raw/LBD_prs.rda"))
+save(LBD_beta, file = paste0(raw_data_path, "prs/raw/LBD_beta.rda"))
+```
+
+## 5. PD
+```{r}
+snp_PD = liftover_full %>% filter(phenotype == "PD") %>% 
+  mutate(ind_sig = if_else(rsID == IndSigSNP, 1, 0)) %>% filter(!is.na(beta)) %>% 
+  mutate(map_yes = case_when(
+    posMapFilt == 1 | eqtlMapFilt == 1 | ciMapFilt == 1 ~ 1,
+    TRUE ~ 0
+  )) %>% select(chr, pos, a1, a0, beta, gwasP, rsID, IndSigSNP, 
+                ind_sig, lead, map_yes, CADD) %>% unique()
+# Reverse beta if necessary by performing SNP matching
+info_snp_PD = snp_match(snp_PD, map) # 2041 variants have been matched
+```
+
+### A. Independent significant SNPs 
+```{r}
+final_extract1 = info_snp_PD %>% filter(ind_sig == 1) %>% unique() # N = 59
+final_extract2 = info_snp_PD %>% filter(ind_sig == 0) %>% 
+  filter(IndSigSNP %!in% final_extract1$IndSigSNP) %>% 
+  group_by(IndSigSNP) %>% arrange(gwasP) %>% mutate(order = row_number()) %>% 
+  filter(order == 1) %>% select(-order) %>% filter(gwasP < 5e-8)
+indsig_PD_final = rbind(final_extract1, final_extract2) %>% unique() %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(indsig_PD_final) # dim = (74,8)
+# Remap to get final
+info_snp = snp_match(indsig_PD_final, map) # 74 variants have been matched
+indsig_beta_PD = info_snp$beta
+PD_beta_indsig = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_PD_indsig = beta)
+# Filter genotype info
+genotype.targ.indsig = genotype_df %>% select(all_of(PD_beta_indsig$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% indsig_beta_PD
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('PD_PRS_indsig', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+PD_1kg_mean = mean(onekg_EUR$PD_PRS_indsig)
+PD_1kg_sd = sd(onekg_EUR$PD_PRS_indsig)
+# Apply to ATLAS
+PD_prs_indsig = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(PD_prs_indsig) # dim = (54935,3)
+PD_prs_indsig$PD_PRS_indsig_norm = 
+  (PD_prs_indsig$PD_PRS_indsig - PD_1kg_mean) / PD_1kg_sd
+PD_prs_indsig = PD_prs_indsig %>% 
+  select(IID, PD_PRS_indsig, PD_PRS_indsig_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### B. Lead SNPs
+```{r}
+final_extract = info_snp_PD %>% filter(lead == 1) %>% unique() # N = 19
+lead_PD_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(lead_PD_final) # dim = (19,8)
+# Remap to get final
+info_snp = snp_match(lead_PD_final, map) # 19 variants have been matched
+lead_beta_PD = info_snp$beta
+PD_beta_lead = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_PD_lead = beta)
+# Filter genotype info
+genotype.targ.lead = genotype_df %>% select(all_of(PD_beta_lead$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.lead[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% lead_beta_PD
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('PD_PRS_lead', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+PD_1kg_mean = mean(onekg_EUR$PD_PRS_lead)
+PD_1kg_sd = sd(onekg_EUR$PD_PRS_lead)
+# Apply to ATLAS
+PD_prs_lead = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(PD_prs_lead) # dim = (54935,3)
+PD_prs_lead$PD_PRS_lead_norm = 
+  (PD_prs_lead$PD_PRS_lead - PD_1kg_mean) / PD_1kg_sd
+PD_prs_lead = PD_prs_lead %>% 
+  select(IID, PD_PRS_lead, PD_PRS_lead_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### C. Mapped SNPs
+```{r}
+final_extract = info_snp_PD %>% filter(map_yes == 1) %>% 
+  group_by(IndSigSNP) %>% arrange(desc(CADD)) %>% 
+  mutate(order = row_number()) %>% filter(order == 1) %>% 
+  select(-order) %>% ungroup()
+map_PD_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(map_PD_final) # dim = (76,8)
+# Remap to get final
+info_snp = snp_match(map_PD_final, map) # 76 variants have been matched
+map_beta_PD = info_snp$beta
+PD_beta_map = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_PD_map = beta)
+# Filter genotype info
+genotype.targ.map = genotype_df %>% select(all_of(PD_beta_map$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.map[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% map_beta_PD
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('PD_PRS_map', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+PD_1kg_mean = mean(onekg_EUR$PD_PRS_map)
+PD_1kg_sd = sd(onekg_EUR$PD_PRS_map)
+# Apply to ATLAS
+PD_prs_map = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(PD_prs_map) # dim = (54935,3)
+PD_prs_map$PD_PRS_map_norm = 
+  (PD_prs_map$PD_PRS_map - PD_1kg_mean) / PD_1kg_sd
+PD_prs_map = PD_prs_map %>% 
+  select(IID, PD_PRS_map, PD_PRS_map_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### Combine all PD PRSs
+```{r}
+PD_prs = PD_prs_indsig %>% 
+  inner_join(PD_prs_lead) %>% inner_join(PD_prs_map)
+PD_beta = PD_beta_indsig %>% full_join(PD_beta_lead) %>% 
+  full_join(PD_beta_map) %>% select(-gwasP)
+save(PD_prs, file = paste0(raw_data_path, "prs/raw/PD_prs.rda"))
+save(PD_beta, file = paste0(raw_data_path, "prs/raw/PD_beta.rda"))
+```
+
+## 6. PSP
+```{r}
+snp_PSP = liftover_full %>% filter(phenotype == "PSP") %>% 
+  mutate(ind_sig = if_else(rsID == IndSigSNP, 1, 0)) %>% filter(!is.na(beta)) %>% 
+  mutate(map_yes = case_when(
+    posMapFilt == 1 | eqtlMapFilt == 1 | ciMapFilt == 1 ~ 1,
+    TRUE ~ 0
+  )) %>% select(chr, pos, a1, a0, beta, gwasP, rsID, IndSigSNP, 
+                ind_sig, lead, map_yes, CADD) %>% unique()
+# Reverse beta if necessary by performing SNP matching
+info_snp_PSP = snp_match(snp_PSP, map, match.min.prop = 0) # 554 variants have been matched
+```
+
+### A. Independent significant SNPs 
+```{r}
+final_extract1 = info_snp_PSP %>% filter(ind_sig == 1) %>% unique() # N = 24
+final_extract2 = info_snp_PSP %>% filter(ind_sig == 0) %>% 
+  filter(IndSigSNP %!in% final_extract1$IndSigSNP) %>% 
+  group_by(IndSigSNP) %>% arrange(gwasP) %>% mutate(order = row_number()) %>% 
+  filter(order == 1) %>% select(-order) %>% filter(gwasP < 5e-8)
+indsig_PSP_final = rbind(final_extract1, final_extract2) %>% unique() %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(indsig_PSP_final) # dim = (34,8)
+# Remap to get final
+info_snp = snp_match(indsig_PSP_final, map) # 34 variants have been matched
+indsig_beta_PSP = info_snp$beta
+PSP_beta_indsig = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_PSP_indsig = beta)
+# Filter genotype info
+genotype.targ.indsig = genotype_df %>% select(all_of(PSP_beta_indsig$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% indsig_beta_PSP
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('PSP_PRS_indsig', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+PSP_1kg_mean = mean(onekg_EUR$PSP_PRS_indsig)
+PSP_1kg_sd = sd(onekg_EUR$PSP_PRS_indsig)
+# Apply to ATLAS
+PSP_prs_indsig = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(PSP_prs_indsig) # dim = (54935,3)
+PSP_prs_indsig$PSP_PRS_indsig_norm = 
+  (PSP_prs_indsig$PSP_PRS_indsig - PSP_1kg_mean) / PSP_1kg_sd
+PSP_prs_indsig = PSP_prs_indsig %>% 
+  select(IID, PSP_PRS_indsig, PSP_PRS_indsig_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### B. Lead SNPs
+```{r}
+final_extract = info_snp_PSP %>% filter(lead == 1) %>% unique() # N = 13
+lead_PSP_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(lead_PSP_final) # dim = (13,8)
+# Remap to get final
+info_snp = snp_match(lead_PSP_final, map) # 13 variants have been matched
+lead_beta_PSP = info_snp$beta
+PSP_beta_lead = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_PSP_lead = beta)
+# Filter genotype info
+genotype.targ.lead = genotype_df %>% select(all_of(PSP_beta_lead$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.lead[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% lead_beta_PSP
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('PSP_PRS_lead', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+PSP_1kg_mean = mean(onekg_EUR$PSP_PRS_lead)
+PSP_1kg_sd = sd(onekg_EUR$PSP_PRS_lead)
+# Apply to ATLAS
+PSP_prs_lead = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(PSP_prs_lead) # dim = (54935,3)
+PSP_prs_lead$PSP_PRS_lead_norm = 
+  (PSP_prs_lead$PSP_PRS_lead - PSP_1kg_mean) / PSP_1kg_sd
+PSP_prs_lead = PSP_prs_lead %>% 
+  select(IID, PSP_PRS_lead, PSP_PRS_lead_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### C. Mapped SNPs
+```{r}
+final_extract = info_snp_PSP %>% filter(map_yes == 1) %>% 
+  group_by(IndSigSNP) %>% arrange(desc(CADD)) %>% 
+  mutate(order = row_number()) %>% filter(order == 1) %>% 
+  select(-order) %>% ungroup()
+map_PSP_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(map_PSP_final) # dim = (35,8)
+# Remap to get final
+info_snp = snp_match(map_PSP_final, map) # 35 variants have been matched
+map_beta_PSP = info_snp$beta
+PSP_beta_map = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_PSP_map = beta)
+# Filter genotype info
+genotype.targ.map = genotype_df %>% select(all_of(PSP_beta_map$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.map[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% map_beta_PSP
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('PSP_PRS_map', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+PSP_1kg_mean = mean(onekg_EUR$PSP_PRS_map)
+PSP_1kg_sd = sd(onekg_EUR$PSP_PRS_map)
+# Apply to ATLAS
+PSP_prs_map = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(PSP_prs_map) # dim = (54935,3)
+PSP_prs_map$PSP_PRS_map_norm = 
+  (PSP_prs_map$PSP_PRS_map - PSP_1kg_mean) / PSP_1kg_sd
+PSP_prs_map = PSP_prs_map %>% 
+  select(IID, PSP_PRS_map, PSP_PRS_map_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### Combine all PSP PRSs
+```{r}
+PSP_prs = PSP_prs_indsig %>% 
+  inner_join(PSP_prs_lead) %>% inner_join(PSP_prs_map)
+PSP_beta = PSP_beta_indsig %>% full_join(PSP_beta_lead) %>% 
+  full_join(PSP_beta_map) %>% select(-gwasP)
+save(PSP_prs, file = paste0(raw_data_path, "prs/raw/PSP_prs.rda"))
+save(PSP_beta, file = paste0(raw_data_path, "prs/raw/PSP_beta.rda"))
+```
+
+## 7. STROKE
+```{r}
+snp_STROKE = liftover_full %>% filter(phenotype == "STROKE") %>% 
+  mutate(ind_sig = if_else(rsID == IndSigSNP, 1, 0)) %>% filter(!is.na(beta)) %>% 
+  mutate(map_yes = case_when(
+    posMapFilt == 1 | eqtlMapFilt == 1 | ciMapFilt == 1 ~ 1,
+    TRUE ~ 0
+  )) %>% select(chr, pos, a1, a0, beta, gwasP, rsID, IndSigSNP, 
+                ind_sig, lead, map_yes, CADD) %>% unique()
+# Reverse beta if necessary by performing SNP matching
+info_snp_STROKE = snp_match(snp_STROKE, map) # 686 variants have been matched
+```
+
+### A. Independent significant SNPs 
+```{r}
+final_extract1 = info_snp_STROKE %>% filter(ind_sig == 1) %>% unique() # N = 39
+final_extract2 = info_snp_STROKE %>% filter(ind_sig == 0) %>% 
+  filter(IndSigSNP %!in% final_extract1$IndSigSNP) %>% 
+  group_by(IndSigSNP) %>% arrange(gwasP) %>% mutate(order = row_number()) %>% 
+  filter(order == 1) %>% select(-order) %>% filter(gwasP < 5e-8)
+indsig_STROKE_final = rbind(final_extract1, final_extract2) %>% unique() %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(indsig_STROKE_final) # dim = (44,8)
+# Remap to get final
+info_snp = snp_match(indsig_STROKE_final, map) # 44 variants have been matched
+indsig_beta_STROKE = info_snp$beta
+STROKE_beta_indsig = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_STROKE_indsig = beta)
+# Filter genotype info
+genotype.targ.indsig = genotype_df %>% select(all_of(STROKE_beta_indsig$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% indsig_beta_STROKE
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('STROKE_PRS_indsig', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+STROKE_1kg_mean = mean(onekg_EUR$STROKE_PRS_indsig)
+STROKE_1kg_sd = sd(onekg_EUR$STROKE_PRS_indsig)
+# Apply to ATLAS
+STROKE_prs_indsig = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(STROKE_prs_indsig) # dim = (54935,3)
+STROKE_prs_indsig$STROKE_PRS_indsig_norm = 
+  (STROKE_prs_indsig$STROKE_PRS_indsig - STROKE_1kg_mean) / STROKE_1kg_sd
+STROKE_prs_indsig = STROKE_prs_indsig %>% 
+  select(IID, STROKE_PRS_indsig, STROKE_PRS_indsig_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### B. Lead SNPs
+```{r}
+final_extract = info_snp_STROKE %>% filter(lead == 1) %>% unique() # N = 17
+lead_STROKE_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(lead_STROKE_final) # dim = (17,8)
+# Remap to get final
+info_snp = snp_match(lead_STROKE_final, map) # 17 variants have been matched
+lead_beta_STROKE = info_snp$beta
+STROKE_beta_lead = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_STROKE_lead = beta)
+# Filter genotype info
+genotype.targ.lead = genotype_df %>% select(all_of(STROKE_beta_lead$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.lead[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% lead_beta_STROKE
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('STROKE_PRS_lead', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+STROKE_1kg_mean = mean(onekg_EUR$STROKE_PRS_lead)
+STROKE_1kg_sd = sd(onekg_EUR$STROKE_PRS_lead)
+# Apply to ATLAS
+STROKE_prs_lead = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(STROKE_prs_lead) # dim = (54935,3)
+STROKE_prs_lead$STROKE_PRS_lead_norm = 
+  (STROKE_prs_lead$STROKE_PRS_lead - STROKE_1kg_mean) / STROKE_1kg_sd
+STROKE_prs_lead = STROKE_prs_lead %>% 
+  select(IID, STROKE_PRS_lead, STROKE_PRS_lead_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### C. Mapped SNPs
+```{r}
+final_extract = info_snp_STROKE %>% filter(map_yes == 1) %>% 
+  group_by(IndSigSNP) %>% arrange(desc(CADD)) %>% 
+  mutate(order = row_number()) %>% filter(order == 1) %>% 
+  select(-order) %>% ungroup()
+map_STROKE_final = final_extract %>% 
+  select(rsid, chr, pos, a1, a0, beta, gwasP, rsID)
+dim(map_STROKE_final) # dim = (39,8)
+# Remap to get final
+info_snp = snp_match(map_STROKE_final, map) # 39 variants have been matched
+map_beta_STROKE = info_snp$beta
+STROKE_beta_map = info_snp %>% 
+  select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
+  dplyr::rename(beta_STROKE_map = beta)
+# Filter genotype info
+genotype.targ.map = genotype_df %>% select(all_of(STROKE_beta_map$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.map[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% map_beta_STROKE
+pred_prs_final = cbind(pred_prs, fam.order[, c('family.ID','sample.ID')])
+names(pred_prs_final) = c('STROKE_PRS_map', 'FID', 'IID')
+# Normalization
+onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
+STROKE_1kg_mean = mean(onekg_EUR$STROKE_PRS_map)
+STROKE_1kg_sd = sd(onekg_EUR$STROKE_PRS_map)
+# Apply to ATLAS
+STROKE_prs_map = pred_prs_final %>% 
+  filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
+dim(STROKE_prs_map) # dim = (54935,3)
+STROKE_prs_map$STROKE_PRS_map_norm = 
+  (STROKE_prs_map$STROKE_PRS_map - STROKE_1kg_mean) / STROKE_1kg_sd
+STROKE_prs_map = STROKE_prs_map %>% 
+  select(IID, STROKE_PRS_map, STROKE_PRS_map_norm) %>% 
+  dplyr::rename(UniqueSampleId = IID)
+```
+
+### Combine all STROKE PRSs
+```{r}
+STROKE_prs = STROKE_prs_indsig %>% 
+  inner_join(STROKE_prs_lead) %>% inner_join(STROKE_prs_map)
+STROKE_beta = STROKE_beta_indsig %>% full_join(STROKE_beta_lead) %>% 
+  full_join(STROKE_beta_map) %>% select(-gwasP)
+save(STROKE_prs, file = paste0(raw_data_path, "prs/raw/STROKE_prs.rda"))
+save(STROKE_beta, file = paste0(raw_data_path, "prs/raw/STROKE_beta.rda"))
+```
+
+
+# Part 3. Combine PRSs from all GWASs
+```{r}
+rm(list = ls())
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/functions.R")
+# Read in PRS + beta data
+prs_folder = paste0(raw_data_path, "prs/raw") 
+prs_files = list.files(prs_folder, pattern = ".rda$")
+for (i in prs_files) {
+  load(paste0(raw_data_path, 'prs/raw/', i))
+}
+```
+
+## 1. Merge all PRSs
+```{r}
+PRS_merge_raw = AD_Kunkle_EUR_prs %>% full_join(AD_Kunkle_AFR_prs) %>% 
+  full_join(AD_Jun_trans_prs) %>% full_join(LBD_prs) %>% 
+  full_join(PD_prs) %>% full_join(PSP_prs) %>% full_join(STROKE_prs) %>% 
+  select(UniqueSampleId, AD_PRS_EUR_indsig_norm, AD_PRS_EUR_lead_norm, AD_PRS_EUR_map_norm,
+         AD_PRS_AFR_indsig_norm, AD_PRS_AFR_lead_norm, AD_PRS_AFR_map_norm,
+         AD_PRS_trans_indsig_norm, AD_PRS_trans_lead_norm, AD_PRS_trans_map_norm,
+         LBD_PRS_indsig_norm, LBD_PRS_lead_norm, LBD_PRS_map_norm,
+         PD_PRS_indsig_norm, PD_PRS_lead_norm, PD_PRS_map_norm,
+         PSP_PRS_indsig_norm, PSP_PRS_lead_norm, PSP_PRS_map_norm,
+         STROKE_PRS_indsig_norm, STROKE_PRS_lead_norm, STROKE_PRS_map_norm)
+# Load in ancestry info + apoe
+load(file = paste0(raw_data_path, "atlas/geno/apoe.rda"))
+load(file = paste0(raw_data_path, "atlas/geno/gen_ancestry.rda"))
+atlas_prs_final = gen_ancestry %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  inner_join(PRS_merge_raw) %>% inner_join(apoe) 
+names(atlas_prs_final) = c("UniqueSampleId", "gen_ancestry", 
+                           "AD_PRS_EUR_indsig", "AD_PRS_EUR_lead", "AD_PRS_EUR_map",  
+                           "AD_PRS_AFR_indsig", "AD_PRS_AFR_lead", "AD_PRS_AFR_map", 
+                           "AD_PRS_Trans_indsig", "AD_PRS_Trans_lead", "AD_PRS_Trans_map",
+                           "LBD_PRS_indsig", "LBD_PRS_lead", "LBD_PRS_map",
+                           "PD_PRS_indsig", "PD_PRS_lead", "PD_PRS_map",
+                           "PSP_PRS_indsig", "PSP_PRS_lead", "PSP_PRS_map", 
+                           "Stroke_PRS_indsig", "Stroke_PRS_lead", "Stroke_PRS_map",
+                           "APOE", "e4count", "e2count")
+dim(atlas_prs_final) # dim = c(51246,26)
+save(atlas_prs_final, file = paste0(raw_data_path, "prs/mod/atlas_prs_final.rda"))
+```
+
+## 2. Combine all beta info from GWASs
+```{r}
+beta_merge_raw = AD_Kunkle_EUR_beta %>% 
+  full_join(AD_Kunkle_AFR_beta, by = c("rsid", "chr", "pos", "a0", "a1")) %>% 
+  full_join(AD_Jun_trans_beta, by = c("rsid", "chr", "pos", "a0", "a1")) %>% 
+  full_join(LBD_beta, by = c("rsid", "chr", "pos", "a0", "a1")) %>% 
+  full_join(PD_beta, by = c("rsid", "chr", "pos", "a0", "a1")) %>% 
+  full_join(PSP_beta, by = c("rsid", "chr", "pos", "a0", "a1")) %>% 
+  full_join(STROKE_beta, by = c("rsid", "chr", "pos", "a0", "a1")) 
+dim(beta_merge_raw) # dim = (601,26)
+save(beta_merge_raw, file = paste0(raw_data_path, "modeling/beta_merge_raw.rda"))
+```
+
+# Part 4. SNP data preprocessing
+## 1. Extract combined SNPs
+```{r}
+# AD ind.sig SNPs
+AD.indsig.combine = beta_merge_raw %>% 
+  filter(!is.na(beta_EUR_indsig) | !is.na(beta_AFR_indsig) | !is.na(beta_trans_indsig)) %>% 
+  rowwise() %>% 
+  mutate(beta_AD_indsig = mean(c(beta_EUR_indsig, beta_AFR_indsig, beta_trans_indsig), na.rm = T)) %>% 
+  select(rsid, chr, pos, a0, a1, beta_EUR_indsig, beta_AFR_indsig, 
+         beta_trans_indsig, beta_AD_indsig)
+AD.indsig.combine.id = AD.indsig.combine %>% pull(rsid) %>% unique()
+length(AD.indsig.combine.id) # 233
+# AD lead SNPs
+AD.lead.combine = beta_merge_raw %>% 
+  filter(!is.na(beta_EUR_lead) | !is.na(beta_AFR_lead) | !is.na(beta_trans_lead)) %>% 
+  rowwise() %>% 
+  mutate(beta_AD_lead = mean(c(beta_EUR_lead, beta_AFR_lead, beta_trans_lead), na.rm = T)) %>% 
+  select(rsid, chr, pos, a0, a1, beta_EUR_lead, beta_AFR_lead, 
+         beta_trans_lead, beta_AD_lead)
+AD.lead.combine.id = AD.lead.combine %>% pull(rsid) %>% unique()
+length(AD.lead.combine.id) # 66
+# AD mapped SNPs
+AD.map.combine = beta_merge_raw %>% 
+  filter(!is.na(beta_EUR_map) | !is.na(beta_AFR_map) | !is.na(beta_trans_map)) %>% 
+  rowwise() %>% 
+  mutate(beta_AD_map = mean(c(beta_EUR_map, beta_AFR_map, beta_trans_map), na.rm = T)) %>% 
+  select(rsid, chr, pos, a0, a1, beta_EUR_map, beta_AFR_map, 
+         beta_trans_map, beta_AD_map)
+AD.map.combine.id = AD.map.combine %>% pull(rsid) %>% unique()
+length(AD.map.combine.id) # 216
+
+# Combined ind.sig SNPs
+all.indsig.combine = beta_merge_raw %>% 
+  filter(!is.na(beta_EUR_indsig) | !is.na(beta_AFR_indsig) | 
+           !is.na(beta_trans_indsig) | !is.na(beta_LBD_indsig) |
+           !is.na(beta_PD_indsig) | !is.na(beta_PSP_indsig) | 
+           !is.na(beta_STROKE_indsig)) %>% left_join(AD.indsig.combine) %>% 
+  rowwise() %>% 
+  mutate(beta_all_indsig = sum(c(beta_AD_indsig, beta_LBD_indsig, beta_PD_indsig, 
+                                 beta_PSP_indsig, beta_STROKE_indsig), na.rm = T))  
+all.indsig.combine.id = all.indsig.combine %>% pull(rsid) %>% unique()
+length(all.indsig.combine.id) # 392
+# Combined lead SNPs
+all.lead.combine = beta_merge_raw %>% 
+  filter(!is.na(beta_EUR_lead) | !is.na(beta_AFR_lead) | 
+           !is.na(beta_trans_lead) | !is.na(beta_LBD_lead) |
+           !is.na(beta_PD_lead) | !is.na(beta_PSP_lead) | 
+           !is.na(beta_STROKE_lead)) %>% left_join(AD.lead.combine) %>% 
+  rowwise() %>% 
+  mutate(beta_all_lead = sum(c(beta_AD_lead, beta_LBD_lead, beta_PD_lead, 
+                               beta_PSP_lead, beta_STROKE_lead), na.rm = T))
+all.lead.combine.id = all.lead.combine %>% pull(rsid) %>% unique()
+length(all.lead.combine.id) # 119
+# Combined map SNPs
+all.map.combine = beta_merge_raw %>% 
+  filter(!is.na(beta_EUR_map) | !is.na(beta_AFR_map) | 
+           !is.na(beta_trans_map) | !is.na(beta_LBD_map) |
+           !is.na(beta_PD_map) | !is.na(beta_PSP_map) | 
+           !is.na(beta_STROKE_map)) %>% left_join(AD.map.combine) %>% 
+  rowwise() %>% 
+  mutate(beta_all_map = sum(c(beta_AD_map, beta_LBD_map, beta_PD_map, 
+                              beta_PSP_map, beta_STROKE_map), na.rm = T)) 
+all.map.combine.id = all.map.combine %>% pull(rsid) %>% unique()
+length(all.map.combine.id) # 366
+```
+
+## 2. Genotyped data
+```{r}
+geno_file = paste0(raw_data_path, 'atlas/geno/full.combine')
+# snp_readBed(paste0(geno_file, '.bed'))
+obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
+# extract the SNP information from the genotype
+map = obj.bigSNP$map[-3]
+names(map) = c("chr", "rsid", "pos", "a1", "a0")
+# Get fam order
+fam_info_atlas = as.data.table(obj.bigSNP$fam[1:54935,])
+# get genotype info
+genotype = obj.bigSNP$genotypes
+genotype.targ = snp_fastImputeSimple(obj.bigSNP$genotypes, method = 'mean2') 
+genotype_atlas = as.matrix(genotype.targ[])[1:54935,] %>% as.data.frame() 
+colnames(genotype_atlas) = map$rsid
+dim(genotype_atlas) # 57483,5708
+# Need to exclude some columns (w/ large amount of missing data)
+ttt = colSums(is.na(genotype_atlas))
+length(ttt[ttt > 10000]) # N = 0 snps that have missing value > 10000
+```
+
+### 1) AD ind.sig SNPs
+```{r}
+AD_combine_indsig_tomap = AD.indsig.combine %>% 
+  select(chr, pos, a1, a0, beta_AD_indsig) %>% unique() %>% 
+  dplyr::rename(beta = beta_AD_indsig)
+info_snp = snp_match(AD_combine_indsig_tomap, map) # 233 variants have been matched
+genotype_df_short = genotype_atlas %>% select(all_of(info_snp$rsid)) 
+dim(genotype_df_short) # dim = (54935, 233)
+# Full genome data
+freeze60k_geno_freq = cbind(fam_info_atlas$sample.ID, genotype_df_short) %>% 
+  as.data.frame() %>% 
+  dplyr::rename(UniqueSampleId = `fam_info_atlas$sample.ID`)
+dim(freeze60k_geno_freq) # dim = c(54935, 233)
+# Remove zero variance
+zero_freq_col = zeroVar(freeze60k_geno_freq)
+length(zero_freq_col)
+# freeze60k_geno_freq = freeze60k_geno_freq[,-zeroVar(freeze60k_geno_freq)]
+freeze60k_geno_freq$UniqueSampleId = as.numeric(freeze60k_geno_freq$UniqueSampleId)
+dim(freeze60k_geno_freq) # dim = c(54935, 234)
+# Multiply by betas
+final_extract_rsid = names(freeze60k_geno_freq)[2:234] %>% as.data.frame()
+names(final_extract_rsid) = "rsid"
+final_extract_decision = final_extract_rsid %>% 
+  left_join(info_snp) %>% select(rsid, beta)
+betas = final_extract_decision$beta
+genotype_df_final = genotype_df_short %>% 
+  select(all_of(names(freeze60k_geno_freq)[2:234]))
+genotype_df_beta = t(t(genotype_df_final) * betas)
+# Add unique ID
+freeze60k_geno_beta = cbind(fam_info_atlas$sample.ID, genotype_df_beta) %>% 
+  as.data.frame() %>% dplyr::rename(UniqueSampleId = V1)
+freeze60k_geno_beta[] = lapply(freeze60k_geno_beta, 
+                               function(x) as.numeric(as.character(x))) %>% 
+  as.data.frame()
+dim(freeze60k_geno_beta) # dim = c(54935, 234)
+# Save data
+freeze60k_geno_freq_AD_indsig = freeze60k_geno_freq
+freeze60k_geno_beta_AD_indsig = freeze60k_geno_beta
+save(freeze60k_geno_freq_AD_indsig, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_freq_AD_indsig.rda"))
+save(freeze60k_geno_beta_AD_indsig, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_beta_AD_indsig.rda"))
+```
+
+### 2) AD lead SNPs
+```{r}
+AD_combine_lead_tomap = AD.lead.combine %>% 
+  select(chr, pos, a1, a0, beta_AD_lead) %>% unique() %>% 
+  dplyr::rename(beta = beta_AD_lead)
+info_snp = snp_match(AD_combine_lead_tomap, map) # 66 variants have been matched
+genotype_df_short = genotype_atlas %>% select(all_of(info_snp$rsid)) 
+dim(genotype_df_short) # dim = (54935, 66)
+# Full genome data
+freeze60k_geno_freq = cbind(fam_info_atlas$sample.ID, genotype_df_short) %>% 
+  as.data.frame() %>% 
+  dplyr::rename(UniqueSampleId = `fam_info_atlas$sample.ID`)
+dim(freeze60k_geno_freq) # dim = c(54935, 67)
+# Remove zero variance
+zero_freq_col = zeroVar(freeze60k_geno_freq)
+length(zero_freq_col)
+# freeze60k_geno_freq = freeze60k_geno_freq[,-zeroVar(freeze60k_geno_freq)]
+freeze60k_geno_freq$UniqueSampleId = as.numeric(freeze60k_geno_freq$UniqueSampleId)
+dim(freeze60k_geno_freq) # dim = c(54935, 67)
+# Multiply by betas
+final_extract_rsid = names(freeze60k_geno_freq)[2:67] %>% as.data.frame()
+names(final_extract_rsid) = "rsid"
+final_extract_decision = final_extract_rsid %>% 
+  left_join(info_snp) %>% select(rsid, beta)
+betas = final_extract_decision$beta
+genotype_df_final = genotype_df_short %>% 
+  select(all_of(names(freeze60k_geno_freq)[2:67]))
+genotype_df_beta = t(t(genotype_df_final) * betas)
+# Add unique ID
+freeze60k_geno_beta = cbind(fam_info_atlas$sample.ID, genotype_df_beta) %>% 
+  as.data.frame() %>% dplyr::rename(UniqueSampleId = V1)
+freeze60k_geno_beta[] = lapply(freeze60k_geno_beta, 
+                               function(x) as.numeric(as.character(x))) %>% 
+  as.data.frame()
+dim(freeze60k_geno_beta) # dim = c(54935, 67)
+# Save data
+freeze60k_geno_freq_AD_lead = freeze60k_geno_freq
+freeze60k_geno_beta_AD_lead = freeze60k_geno_beta
+save(freeze60k_geno_freq_AD_lead, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_freq_AD_lead.rda"))
+save(freeze60k_geno_beta_AD_lead, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_beta_AD_lead.rda"))
+```
+
+### 3) AD map SNPs
+```{r}
+AD_combine_map_tomap = AD.map.combine %>% 
+  select(chr, pos, a1, a0, beta_AD_map) %>% unique() %>% 
+  dplyr::rename(beta = beta_AD_map)
+info_snp = snp_match(AD_combine_map_tomap, map) # 216 variants have been matched
+genotype_df_short = genotype_atlas %>% select(all_of(info_snp$rsid)) 
+dim(genotype_df_short) # dim = (54935, 216)
+# Full genome data
+freeze60k_geno_freq = cbind(fam_info_atlas$sample.ID, genotype_df_short) %>% 
+  as.data.frame() %>% 
+  dplyr::rename(UniqueSampleId = `fam_info_atlas$sample.ID`)
+dim(freeze60k_geno_freq) # dim = c(54935, 217)
+# Remove zero variance
+zero_freq_col = zeroVar(freeze60k_geno_freq)
+length(zero_freq_col)
+# freeze60k_geno_freq = freeze60k_geno_freq[,-zeroVar(freeze60k_geno_freq)]
+freeze60k_geno_freq$UniqueSampleId = as.numeric(freeze60k_geno_freq$UniqueSampleId)
+dim(freeze60k_geno_freq) # dim = c(54935, 217)
+# Multiply by betas
+final_extract_rsid = names(freeze60k_geno_freq)[2:217] %>% as.data.frame()
+names(final_extract_rsid) = "rsid"
+final_extract_decision = final_extract_rsid %>% 
+  left_join(info_snp) %>% select(rsid, beta)
+betas = final_extract_decision$beta
+genotype_df_final = genotype_df_short %>% 
+  select(all_of(names(freeze60k_geno_freq)[2:217]))
+genotype_df_beta = t(t(genotype_df_final) * betas)
+# Add unique ID
+freeze60k_geno_beta = cbind(fam_info_atlas$sample.ID, genotype_df_beta) %>% 
+  as.data.frame() %>% dplyr::rename(UniqueSampleId = V1)
+freeze60k_geno_beta[] = lapply(freeze60k_geno_beta, 
+                               function(x) as.numeric(as.character(x))) %>% 
+  as.data.frame()
+dim(freeze60k_geno_beta) # dim = c(54935, 217)
+# Save data
+freeze60k_geno_freq_AD_map = freeze60k_geno_freq
+freeze60k_geno_beta_AD_map = freeze60k_geno_beta
+save(freeze60k_geno_freq_AD_map, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_freq_AD_map.rda"))
+save(freeze60k_geno_beta_AD_map, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_beta_AD_map.rda"))
+```
+
+### 4) Combined ind.sig SNPs
+```{r}
+all_combine_indsig_tomap = all.indsig.combine %>% 
+  select(chr, pos, a1, a0, beta_all_indsig) %>% unique() %>% 
+  dplyr::rename(beta = beta_all_indsig)
+info_snp = snp_match(all_combine_indsig_tomap, map) # 392 variants have been matched
+genotype_df_short = genotype_atlas %>% select(all_of(info_snp$rsid)) 
+dim(genotype_df_short) # dim = (54935, 392)
+# Full genome data
+freeze60k_geno_freq = cbind(fam_info_atlas$sample.ID, genotype_df_short) %>% 
+  as.data.frame() %>% 
+  dplyr::rename(UniqueSampleId = `fam_info_atlas$sample.ID`)
+dim(freeze60k_geno_freq) # dim = c(54935, 393)
+# Remove zero variance
+zero_freq_col = zeroVar(freeze60k_geno_freq)
+length(zero_freq_col)
+# freeze60k_geno_freq = freeze60k_geno_freq[,-zeroVar(freeze60k_geno_freq)]
+freeze60k_geno_freq$UniqueSampleId = as.numeric(freeze60k_geno_freq$UniqueSampleId)
+dim(freeze60k_geno_freq) # dim = c(54935, 393)
+# Multiply by betas
+final_extract_rsid = names(freeze60k_geno_freq)[2:393] %>% as.data.frame()
+names(final_extract_rsid) = "rsid"
+final_extract_decision = final_extract_rsid %>% 
+  left_join(info_snp) %>% select(rsid, beta)
+betas = final_extract_decision$beta
+genotype_df_final = genotype_df_short %>% 
+  select(all_of(names(freeze60k_geno_freq)[2:393]))
+genotype_df_beta = t(t(genotype_df_final) * betas)
+# Add unique ID
+freeze60k_geno_beta = cbind(fam_info_atlas$sample.ID, genotype_df_beta) %>% 
+  as.data.frame() %>% dplyr::rename(UniqueSampleId = V1)
+freeze60k_geno_beta[] = lapply(freeze60k_geno_beta, 
+                               function(x) as.numeric(as.character(x))) %>% 
+  as.data.frame()
+dim(freeze60k_geno_beta) # dim = c(54935, 393)
+# Save data
+freeze60k_geno_freq_all_indsig = freeze60k_geno_freq
+freeze60k_geno_beta_all_indsig = freeze60k_geno_beta
+save(freeze60k_geno_freq_all_indsig, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_freq_all_indsig.rda"))
+save(freeze60k_geno_beta_all_indsig, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_beta_all_indsig.rda"))
+```
+
+### 5) Combined lead SNPs
+```{r}
+all_combine_lead_tomap = all.lead.combine %>% 
+  select(chr, pos, a1, a0, beta_all_lead) %>% unique() %>% 
+  dplyr::rename(beta = beta_all_lead)
+info_snp = snp_match(all_combine_lead_tomap, map) # 119 variants have been matched
+genotype_df_short = genotype_atlas %>% select(all_of(info_snp$rsid)) 
+dim(genotype_df_short) # dim = (54935, 66)
+# Full genome data
+freeze60k_geno_freq = cbind(fam_info_atlas$sample.ID, genotype_df_short) %>% 
+  as.data.frame() %>% 
+  dplyr::rename(UniqueSampleId = `fam_info_atlas$sample.ID`)
+dim(freeze60k_geno_freq) # dim = c(54935, 120)
+# Remove zero variance
+zero_freq_col = zeroVar(freeze60k_geno_freq)
+length(zero_freq_col)
+# freeze60k_geno_freq = freeze60k_geno_freq[,-zeroVar(freeze60k_geno_freq)]
+freeze60k_geno_freq$UniqueSampleId = as.numeric(freeze60k_geno_freq$UniqueSampleId)
+dim(freeze60k_geno_freq) # dim = c(54935, 120)
+# Multiply by betas
+final_extract_rsid = names(freeze60k_geno_freq)[2:120] %>% as.data.frame()
+names(final_extract_rsid) = "rsid"
+final_extract_decision = final_extract_rsid %>% 
+  left_join(info_snp) %>% select(rsid, beta)
+betas = final_extract_decision$beta
+genotype_df_final = genotype_df_short %>% 
+  select(all_of(names(freeze60k_geno_freq)[2:120]))
+genotype_df_beta = t(t(genotype_df_final) * betas)
+# Add unique ID
+freeze60k_geno_beta = cbind(fam_info_atlas$sample.ID, genotype_df_beta) %>% 
+  as.data.frame() %>% dplyr::rename(UniqueSampleId = V1)
+freeze60k_geno_beta[] = lapply(freeze60k_geno_beta, 
+                               function(x) as.numeric(as.character(x))) %>% 
+  as.data.frame()
+dim(freeze60k_geno_beta) # dim = c(54935, 67)
+# Save data
+freeze60k_geno_freq_all_lead = freeze60k_geno_freq
+freeze60k_geno_beta_all_lead = freeze60k_geno_beta
+save(freeze60k_geno_freq_all_lead, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_freq_all_lead.rda"))
+save(freeze60k_geno_beta_all_lead, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_beta_all_lead.rda"))
+```
+
+### 6) Combined map SNPs
+```{r}
+all_combine_map_tomap = all.map.combine %>% 
+  select(chr, pos, a1, a0, beta_all_map) %>% unique() %>% 
+  dplyr::rename(beta = beta_all_map)
+info_snp = snp_match(all_combine_map_tomap, map) # 366 variants have been matched
+genotype_df_short = genotype_atlas %>% select(all_of(info_snp$rsid)) 
+dim(genotype_df_short) # dim = (54935, 366)
+# Full genome data
+freeze60k_geno_freq = cbind(fam_info_atlas$sample.ID, genotype_df_short) %>% 
+  as.data.frame() %>% 
+  dplyr::rename(UniqueSampleId = `fam_info_atlas$sample.ID`)
+dim(freeze60k_geno_freq) # dim = c(54935, 367)
+# Remove zero variance
+zero_freq_col = zeroVar(freeze60k_geno_freq)
+length(zero_freq_col)
+# freeze60k_geno_freq = freeze60k_geno_freq[,-zeroVar(freeze60k_geno_freq)]
+freeze60k_geno_freq$UniqueSampleId = as.numeric(freeze60k_geno_freq$UniqueSampleId)
+dim(freeze60k_geno_freq) # dim = c(54935, 367)
+# Multiply by betas
+final_extract_rsid = names(freeze60k_geno_freq)[2:367] %>% as.data.frame()
+names(final_extract_rsid) = "rsid"
+final_extract_decision = final_extract_rsid %>% 
+  left_join(info_snp) %>% select(rsid, beta)
+betas = final_extract_decision$beta
+genotype_df_final = genotype_df_short %>% 
+  select(all_of(names(freeze60k_geno_freq)[2:367]))
+genotype_df_beta = t(t(genotype_df_final) * betas)
+# Add unique ID
+freeze60k_geno_beta = cbind(fam_info_atlas$sample.ID, genotype_df_beta) %>% 
+  as.data.frame() %>% dplyr::rename(UniqueSampleId = V1)
+freeze60k_geno_beta[] = lapply(freeze60k_geno_beta, 
+                               function(x) as.numeric(as.character(x))) %>% 
+  as.data.frame()
+dim(freeze60k_geno_beta) # dim = c(54935, 367)
+# Save data
+freeze60k_geno_freq_all_map = freeze60k_geno_freq
+freeze60k_geno_beta_all_map = freeze60k_geno_beta
+save(freeze60k_geno_freq_all_map, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_freq_all_map.rda"))
+save(freeze60k_geno_beta_all_map, 
+     file = paste0(raw_data_path, 
+                   "modeling/freeze60k_geno_beta_all_map.rda"))
+```
+
