@@ -1,0 +1,99 @@
+---
+title: "4_AOU_validation"
+author: "Joy_Fu"
+date: "2023-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+load(file = paste0(raw_data_path, "modeling/AMR/lasso_snp_allmap.rda"))
+demo_set = c("age", "female", paste0('PC', 1:4))
+# Get mapped SNPs
+lasso_map_snp = selected_snp_summary_allmap %>% 
+  arrange(desc(avg_percentage)) %>% 
+  filter(freq >= 1000/ncol(freeze60k_geno_beta_all_map) & 
+           (variable %!in% demo_set)) %>% 
+  rowid_to_column(var = "rank_num") %>% 
+  filter(variable %in% selected_vars)
+dim(lasso_map_snp) # c(65,3)
+selected_vars = snp.lasso.all.map@model$coefficients_table$names
+coeff_table = snp.lasso.all.map@model$coefficients_table
+write.table(final_lasso_snp, 
+            file = paste0(output_path, "lasso_snp_AMR.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+
+# Select all potential SNPs
+lasso_map_snp_add = lasso_map_snp %>% 
+  separate(variable, into = c("chr", "pos", "a0", "a1"), 
+           sep = ":", remove = FALSE) %>% 
+  mutate(pos_plus = as.character(as.numeric(pos) + 1)) %>% 
+  mutate(output_var = paste0(chr, ":", pos, "-", pos_plus))
+# Output results to table - All of Us
+snp_beta_short = beta_merge_raw %>% rowwise() %>% 
+  mutate(beta_AD_map = mean(c(beta_EUR_map, beta_AFR_map, beta_trans_map), na.rm = T)) %>% 
+  mutate(beta_all_map = sum(c(beta_AD_map, beta_LBD_map, beta_PD_map, 
+                              beta_PSP_map, beta_STROKE_map), na.rm = T)) %>% 
+  select(rsid, beta_all_map)
+final_lasso_snp = lasso_map_snp_add %>% ungroup() %>% 
+  left_join(snp_beta_short, by = c("variable" = "rsid")) %>% 
+  select(chr, pos, a0, a1, output_var, beta_all_map) %>% unique() %>% 
+dim(final_lasso_snp) # (65,6)
+write.table(final_lasso_snp, 
+            file = paste0(output_path, "lasso_snp_AMR.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+```{r}
+seed_num = 20224766
+target.train = as.h2o(snp_df_all_map)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 2: fit LASSO
+
+X = c(lasso_map_snp$variable, "age", "female")
+snp.lasso.all.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO SNPs (all map)", 
+                            nfolds = 5, fold_assignment = "Stratified",
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE,
+                            standardize = T, keep_cross_validation_models = F)
+coeff_table = snp.lasso.all.map@model$coefficients_table
+write.table(coeff_table, 
+            file = paste0(output_path, "coeff_table_AMR.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+
+coeff_compare = demo.only@model$coefficients_table
+write.table(coeff_compare, 
+            file = paste0(output_path, "coeff_table_demoonly_AMR.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+```{r}
+# Extract results
+model_list = c("snp.lasso.all.map")
+for (i in 1:length(model_list)) {
+  print(paste0("Model: ", model_list[i]))
+  # Run extraction function
+  extract_cv = extract_cv_results(get(model_list[i]))
+  model_metric = t(extract_cv[[1]]) %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  model_performance = extract_cv[[2]] %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  if (i == 1) {
+    all_model_metric = model_metric
+    all_model_performance = model_performance
+  } else {
+    all_model_metric = rbind(all_model_metric, model_metric)
+    all_model_performance = rbind(all_model_performance, model_performance)
+  }
+}
+# Join results together
+lasso_snp_model_metric = rbind(all_model_metric)
+lasso_snp_model_performance = rbind(all_model_performance)
+lasso_snp_model_final_summary = lasso_snp_model_metric %>% 
+  inner_join(lasso_snp_model_performance)
+```
+

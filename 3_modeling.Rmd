@@ -476,12 +476,916 @@ lasso_snp_model_summary = lasso_snp_model_metric %>%
   inner_join(lasso_snp_model_performance)
 ```
 
-## 3. AutoML
+
+# Part 2. AFR analyses
 ```{r}
+# Read in cleaned data
+load(file = paste0(raw_data_path, "modeling/AFR/sample_AFR.rda"))
+# Join PRSs
+sample_AFR_full = sample_AFR %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  left_join(atlas_prs_final) %>% 
+  select(-c(UniqueSampleId, gen_ancestry, record_length, 
+            n_diagnosis, n_encounter,
+            enc_per_yr, APOE, e2count)) %>% drop_na()
+dim(sample_AFR_full) # dim = (854,45)
+# Set response variable
+Y = "dementia"
+demo_set = c("age", "female", paste0('PC', 1:4))
+```
+
+## 1. PRS models
+### 1) Model setups
+```{r}
+# set h2o project
+h2o.init(nthreads = -1)
+target.train = as.h2o(sample_AFR_full)
+target.train[,Y] = as.factor(target.train[,Y])
+```
+
+### 2) Single PRS models
+```{r}
+seed_num = 13471118
+#========= Benchmark: demo only =========
+X = c("age", "female")
+demo.only = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                    balance_classes = T, model_id = "Demo only", 
+                    nfolds = 5, fold_assignment = "Stratified",
+                    seed = seed_num, family = "binomial", lambda = 0, 
+                    standardize = T, keep_cross_validation_models = F)
+#========= single PRS model =========
+# AD PRS EUR
+X = c("AD_PRS_EUR_indsig", demo_set)
+PRS.EUR.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                         balance_classes = T, model_id = "AD PRS EUR indsig", 
+                         nfolds = 5, fold_assignment = "Stratified", 
+                         seed = seed_num, family = "binomial", lambda = 0, 
+                         standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_lead", demo_set)
+PRS.EUR.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                       balance_classes = T, model_id = "AD PRS EUR lead", 
+                       nfolds = 5, fold_assignment = "Stratified", 
+                       seed = seed_num, family = "binomial", lambda = 0, 
+                       standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_map", demo_set)
+PRS.EUR.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                      balance_classes = T, model_id = "AD PRS EUR map", 
+                      nfolds = 5, fold_assignment = "Stratified", 
+                      seed = seed_num, family = "binomial", lambda = 0, 
+                      standardize = T, keep_cross_validation_models = F)
+# AD PRS AFR
+X = c("AD_PRS_AFR_indsig", demo_set)
+PRS.AFR.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                         balance_classes = T, model_id = "AD PRS AFR indsig", 
+                         nfolds = 5, fold_assignment = "Stratified", 
+                         seed = seed_num, family = "binomial", lambda = 0, 
+                         standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_AFR_lead", demo_set)
+PRS.AFR.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                       balance_classes = T, model_id = "AD PRS AFR lead", 
+                       nfolds = 5, fold_assignment = "Stratified", 
+                       seed = seed_num, family = "binomial", lambda = 0, 
+                       standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_AFR_map", demo_set)
+PRS.AFR.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                      balance_classes = T, model_id = "AD PRS AFR map", 
+                      nfolds = 5, fold_assignment = "Stratified", 
+                      seed = seed_num, family = "binomial", lambda = 0, 
+                      standardize = T, keep_cross_validation_models = F)
+# AD PRS Trans 
+X = c("AD_PRS_Trans_indsig", demo_set)
+PRS.trans.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                           balance_classes = T, model_id = "AD PRS Trans indsig", 
+                           nfolds = 5, fold_assignment = "Stratified", 
+                           seed = seed_num, family = "binomial", lambda = 0, 
+                           standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_Trans_lead", demo_set)
+PRS.trans.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                         balance_classes = T, model_id = "AD PRS Trans lead", 
+                         nfolds = 5, fold_assignment = "Stratified", 
+                         seed = seed_num, family = "binomial", lambda = 0, 
+                         standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_Trans_map", demo_set)
+PRS.trans.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                        balance_classes = T, model_id = "AD PRS Trans map", 
+                        nfolds = 5, fold_assignment = "Stratified", 
+                        seed = seed_num, family = "binomial", lambda = 0, 
+                        standardize = T, keep_cross_validation_models = F)
+# e4count
+X = c("e4count", demo_set)
+e4count = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                  balance_classes = T, model_id = "e4count", 
+                  nfolds = 5, fold_assignment = "Stratified", 
+                  seed = seed_num, family = "binomial", lambda = 0, 
+                  standardize = T, keep_cross_validation_models = F)
+```
+
+```{r}
+all_model_metric = c()
+all_model_performance = c()
+# Extract results
+model_list = c("demo.only", "e4count", 
+               "PRS.EUR.indsig", "PRS.EUR.lead", "PRS.EUR.map", 
+               "PRS.AFR.indsig", "PRS.AFR.lead", "PRS.AFR.map", 
+               "PRS.trans.indsig", "PRS.trans.lead", "PRS.trans.map")
+for (i in 1:length(model_list)) {
+  print(paste0("Model: ", model_list[i]))
+  # Run extraction function
+  extract_cv = extract_cv_results(get(model_list[i]))
+  model_metric = t(extract_cv[[1]]) %>% as.data.frame() %>%
+    mutate(mark = model_list[i])
+  model_performance = extract_cv[[2]] %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  if (i == 1) {
+    all_model_metric = model_metric
+    all_model_performance = model_performance
+  } else {
+    all_model_metric = rbind(all_model_metric, model_metric)
+    all_model_performance = rbind(all_model_performance, model_performance)
+  }
+}
+# Join results together
+single_prs_model_metric = rbind(all_model_metric)
+single_prs_model_performance = rbind(all_model_performance)
+single_prs_model_summary = single_prs_model_metric %>% 
+  inner_join(single_prs_model_performance)
+```
+
+
+### 3) Multiple PRS model
+```{r}
+# Stepwise selection
+intercept_only = glm(dementia ~ age + female, 
+                     data = sample_AFR_full, family = 'binomial')
+f1 = paste(names(sample_AFR_full)[names(sample_AFR_full) %!in% 
+                                    c("dementia", "e4count") ], 
+           collapse = "` + `")
+# define model with all predictors
+all = glm(paste0("dementia ~ `", f1, "`"), data = sample_AFR_full, 
+          family = 'binomial')
+# perform forward stepwise regression
+forward = step(intercept_only, direction = 'forward', 
+               scope = formula(all), trace = 0)
+forward_vars = gsub("\\+ ", "", forward$anova$Step)[2:length(forward$anova$Step)]
+forward_vars = gsub("`", "", forward_vars)
+print(forward_vars)
+```
+
+```{r}
+seed_num = 13471118
+#========= multiple PRS model =========
+# AD PRS combinations
+X = c("AD_PRS_EUR_indsig", "AD_PRS_Trans_indsig", "AD_PRS_AFR_indsig", demo_set)
+PRS.AD.indsig.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                balance_classes = T, 
+                                model_id = "AD PRS ind.sig combine", 
+                                nfolds = 5, fold_assignment = "Stratified", 
+                                seed = seed_num, family = "binomial", lambda = 0, 
+                                standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_lead", "AD_PRS_Trans_lead", "AD_PRS_AFR_lead", demo_set)
+PRS.AD.lead.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                              balance_classes = T, 
+                              model_id = "AD PRS lead combine", 
+                              nfolds = 5, fold_assignment = "Stratified", 
+                              seed = seed_num, family = "binomial", lambda = 0, 
+                              standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_map", "AD_PRS_Trans_map", "AD_PRS_AFR_map", demo_set)
+PRS.AD.map.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                             balance_classes = T, 
+                             model_id = "AD PRS map combine", 
+                             nfolds = 5, fold_assignment = "Stratified", 
+                             seed = seed_num, family = "binomial", lambda = 0, 
+                             standardize = T, keep_cross_validation_models = F)
+# AD + neuro combinations
+X = c("AD_PRS_EUR_indsig", "AD_PRS_Trans_indsig", "AD_PRS_AFR_indsig", 
+      "PD_PRS_indsig", "LBD_PRS_indsig", "PSP_PRS_indsig", 
+      "Stroke_PRS_indsig", demo_set)
+PRS.neuro.indsig.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                   balance_classes = T, 
+                                   model_id = "Neuro PRS ind.sig combine", 
+                                   nfolds = 5, fold_assignment = "Stratified", 
+                                   seed = seed_num, family = "binomial", lambda = 0, 
+                                   standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_lead", "AD_PRS_Trans_lead", "AD_PRS_AFR_lead", 
+      "PD_PRS_lead", "LBD_PRS_lead", "PSP_PRS_lead", 
+      "Stroke_PRS_lead", demo_set)
+PRS.neuro.lead.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                 balance_classes = T, 
+                                 model_id = "Neuro PRS lead combine", 
+                                 nfolds = 5, fold_assignment = "Stratified", 
+                                 seed = seed_num, family = "binomial", lambda = 0, 
+                                 standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_map", "AD_PRS_Trans_map", "AD_PRS_AFR_map", 
+      "PD_PRS_map", "LBD_PRS_map", "PSP_PRS_map", 
+      "Stroke_PRS_map", demo_set)
+PRS.neuro.map.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                balance_classes = T,
+                                model_id = "Neuro PRS map combine", 
+                                nfolds = 5, fold_assignment = "Stratified", 
+                                seed = seed_num, family = "binomial", lambda = 0, 
+                                standardize = T, keep_cross_validation_models = F)
+# Stepwise selected PRSs
+X = c("AD_PRS_Trans_lead", "PD_PRS_map", demo_set) 
+PRS.neuro.select = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                           balance_classes = T, model_id = "Neuro PRS select",
+                           nfolds = 5, fold_assignment = "Stratified", 
+                           seed = seed_num, family = "binomial", lambda = 0, 
+                           standardize = T, keep_cross_validation_models = F)
+```
+
+```{r}
+all_model_metric = c()
+all_model_performance = c()
+# Extract results
+model_list = c("PRS.AD.indsig.combine", "PRS.AD.lead.combine", 
+               "PRS.AD.map.combine", "PRS.neuro.indsig.combine", 
+               "PRS.neuro.lead.combine", "PRS.neuro.map.combine", 
+               "PRS.neuro.select")
+for (i in 1:length(model_list)) {
+  print(paste0("Model: ", model_list[i]))
+  # Run extraction function
+  extract_cv = extract_cv_results(get(model_list[i]))
+  model_metric = t(extract_cv[[1]]) %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  model_performance = extract_cv[[2]] %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  if (i == 1) {
+    all_model_metric = model_metric
+    all_model_performance = model_performance
+  } else {
+    all_model_metric = rbind(all_model_metric, model_metric)
+    all_model_performance = rbind(all_model_performance, model_performance)
+  }
+}
+# Join results together
+multi_prs_model_metric = rbind(all_model_metric)
+multi_prs_model_performance = rbind(all_model_performance)
+multi_prs_model_summary = multi_prs_model_metric %>% 
+  inner_join(multi_prs_model_performance)
+
+full_prs_model_summary = rbind(single_prs_model_summary, 
+                               multi_prs_model_summary) %>% as.data.frame()
+```
+
+## 2. Weighted-SNP models
+```{r}
+snp_df_AD_indsig = sample_AFR %>% 
+  left_join(freeze60k_geno_beta_AD_indsig) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_AD_lead = sample_AFR %>% 
+  left_join(freeze60k_geno_beta_AD_lead) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_AD_map = sample_AFR %>% 
+  left_join(freeze60k_geno_beta_AD_map) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_all_indsig = sample_AFR %>% 
+  left_join(freeze60k_geno_beta_all_indsig) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_all_lead = sample_AFR %>% 
+  left_join(freeze60k_geno_beta_all_lead) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_all_map = sample_AFR %>% 
+  left_join(freeze60k_geno_beta_all_map) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+```
+
+### Run two-step LASSO models
+```{r}
+# LASSO selected SNPs
+seed_num = 13471118
+target.train = as.h2o(snp_df_AD_indsig)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:256])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_AFR_AD_indsig = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_AFR_AD_indsig, demo_set)
+snp.lasso.AD.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                              balance_classes = T, model_id = "LASSO SNPs (AD indsig)", 
+                              nfolds = 5, fold_assignment = "Stratified", 
+                              seed = seed_num, family = "binomial",
+                              alpha = 1, lambda_search = TRUE,
+                              standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_AD_lead)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:89])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_AFR_AD_lead = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_AFR_AD_lead, demo_set)
+snp.lasso.AD.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO SNPs (AD lead)", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE,
+                            standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_AD_map)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:239])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_AFR_AD_map = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_AFR_AD_map, demo_set)
+snp.lasso.AD.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                           balance_classes = T, model_id = "LASSO SNPs (AD map)", 
+                           nfolds = 5, fold_assignment = "Stratified",
+                           seed = seed_num, family = "binomial", 
+                           alpha = 1, lambda_search = TRUE,
+                           standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_all_indsig)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:415])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_AFR_all_indsig = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_AFR_all_indsig, demo_set)
+snp.lasso.all.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                               balance_classes = T, model_id = "LASSO SNPs (all indsig)", 
+                               nfolds = 5, fold_assignment = "Stratified",
+                               seed = seed_num, family = "binomial", 
+                               alpha = 1, lambda_search = TRUE,
+                               standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_all_lead)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:142])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_AFR_all_lead = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_AFR_all_lead, demo_set)
+snp.lasso.all.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                             balance_classes = T, model_id = "LASSO SNPs (all lead)", 
+                             nfolds = 5, fold_assignment = "Stratified",
+                             seed = seed_num, family = "binomial", 
+                             alpha = 1, lambda_search = TRUE,
+                             standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_all_map)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:389])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_AFR_all_map = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_AFR_all_map, demo_set)
+snp.lasso.all.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO SNPs (all map)", 
+                            nfolds = 5, fold_assignment = "Stratified",
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE,
+                            standardize = T, keep_cross_validation_models = F)
+```
+
+```{r}
+all_model_metric = c()
+all_model_performance = c()
+# Extract results
+model_list = c("snp.lasso.AD.indsig", "snp.lasso.AD.lead", 
+               "snp.lasso.AD.map", "snp.lasso.all.indsig",
+               "snp.lasso.all.lead", "snp.lasso.all.map")
+for (i in 1:length(model_list)) {
+  print(paste0("Model: ", model_list[i]))
+  # Run extraction function
+  extract_cv = extract_cv_results(get(model_list[i]))
+  model_metric = t(extract_cv[[1]]) %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  model_performance = extract_cv[[2]] %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  if (i == 1) {
+    all_model_metric = model_metric
+    all_model_performance = model_performance
+  } else {
+    all_model_metric = rbind(all_model_metric, model_metric)
+    all_model_performance = rbind(all_model_performance, model_performance)
+  }
+}
+# Join results together
+lasso_snp_model_metric = rbind(all_model_metric)
+lasso_snp_model_performance = rbind(all_model_performance)
+lasso_snp_model_summary = lasso_snp_model_metric %>% 
+  inner_join(lasso_snp_model_performance)
+```
+
+
+# Part 3. EAS analyses
+```{r}
+# Read in cleaned data
+load(file = paste0(raw_data_path, "modeling/EAS/sample_EAS.rda"))
+# Join PRSs
+sample_EAS_full = sample_EAS %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  left_join(atlas_prs_final) %>% 
+  select(-c(UniqueSampleId, gen_ancestry, record_length, 
+            n_diagnosis, n_encounter,
+            enc_per_yr, APOE, e2count)) %>% drop_na()
+dim(sample_EAS_full) # dim = (1333,45)
+# Set response variable
+Y = "dementia"
+demo_set = c("age", "female", paste0('PC', 1:4))
+```
+
+## 1. PRS models
+### 1) Model setups
+```{r}
+# set h2o project
+h2o.init(nthreads = -1)
+target.train = as.h2o(sample_EAS_full)
+target.train[,Y] = as.factor(target.train[,Y])
+```
+
+### 2) Single PRS models
+```{r}
+seed_num = 13471118
+#========= Benchmark: demo only =========
+X = c("age", "female")
+demo.only = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                    balance_classes = T, model_id = "Demo only", 
+                    nfolds = 5, fold_assignment = "Stratified",
+                    seed = seed_num, family = "binomial", lambda = 0, 
+                    standardize = T, keep_cross_validation_models = F)
+#========= single PRS model =========
+# AD PRS EUR
+X = c("AD_PRS_EUR_indsig", demo_set)
+PRS.EUR.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                         balance_classes = T, model_id = "AD PRS EUR indsig", 
+                         nfolds = 5, fold_assignment = "Stratified", 
+                         seed = seed_num, family = "binomial", lambda = 0, 
+                         standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_lead", demo_set)
+PRS.EUR.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                       balance_classes = T, model_id = "AD PRS EUR lead", 
+                       nfolds = 5, fold_assignment = "Stratified", 
+                       seed = seed_num, family = "binomial", lambda = 0, 
+                       standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_map", demo_set)
+PRS.EUR.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                      balance_classes = T, model_id = "AD PRS EUR map", 
+                      nfolds = 5, fold_assignment = "Stratified", 
+                      seed = seed_num, family = "binomial", lambda = 0, 
+                      standardize = T, keep_cross_validation_models = F)
+# AD PRS AFR
+X = c("AD_PRS_AFR_indsig", demo_set)
+PRS.AFR.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                         balance_classes = T, model_id = "AD PRS AFR indsig", 
+                         nfolds = 5, fold_assignment = "Stratified", 
+                         seed = seed_num, family = "binomial", lambda = 0, 
+                         standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_AFR_lead", demo_set)
+PRS.AFR.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                       balance_classes = T, model_id = "AD PRS AFR lead", 
+                       nfolds = 5, fold_assignment = "Stratified", 
+                       seed = seed_num, family = "binomial", lambda = 0, 
+                       standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_AFR_map", demo_set)
+PRS.AFR.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                      balance_classes = T, model_id = "AD PRS AFR map", 
+                      nfolds = 5, fold_assignment = "Stratified", 
+                      seed = seed_num, family = "binomial", lambda = 0, 
+                      standardize = T, keep_cross_validation_models = F)
+# AD PRS Trans 
+X = c("AD_PRS_Trans_indsig", demo_set)
+PRS.trans.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                           balance_classes = T, model_id = "AD PRS Trans indsig", 
+                           nfolds = 5, fold_assignment = "Stratified", 
+                           seed = seed_num, family = "binomial", lambda = 0, 
+                           standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_Trans_lead", demo_set)
+PRS.trans.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                         balance_classes = T, model_id = "AD PRS Trans lead", 
+                         nfolds = 5, fold_assignment = "Stratified", 
+                         seed = seed_num, family = "binomial", lambda = 0, 
+                         standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_Trans_map", demo_set)
+PRS.trans.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                        balance_classes = T, model_id = "AD PRS Trans map", 
+                        nfolds = 5, fold_assignment = "Stratified", 
+                        seed = seed_num, family = "binomial", lambda = 0, 
+                        standardize = T, keep_cross_validation_models = F)
+# e4count
+X = c("e4count", demo_set)
+e4count = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                  balance_classes = T, model_id = "e4count", 
+                  nfolds = 5, fold_assignment = "Stratified", 
+                  seed = seed_num, family = "binomial", lambda = 0, 
+                  standardize = T, keep_cross_validation_models = F)
+```
+
+```{r}
+all_model_metric = c()
+all_model_performance = c()
+# Extract results
+model_list = c("demo.only", "e4count", 
+               "PRS.EUR.indsig", "PRS.EUR.lead", "PRS.EUR.map", 
+               "PRS.AFR.indsig", "PRS.AFR.lead", "PRS.AFR.map", 
+               "PRS.trans.indsig", "PRS.trans.lead", "PRS.trans.map")
+for (i in 1:length(model_list)) {
+  print(paste0("Model: ", model_list[i]))
+  # Run extraction function
+  extract_cv = extract_cv_results(get(model_list[i]))
+  model_metric = t(extract_cv[[1]]) %>% as.data.frame() %>%
+    mutate(mark = model_list[i])
+  model_performance = extract_cv[[2]] %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  if (i == 1) {
+    all_model_metric = model_metric
+    all_model_performance = model_performance
+  } else {
+    all_model_metric = rbind(all_model_metric, model_metric)
+    all_model_performance = rbind(all_model_performance, model_performance)
+  }
+}
+# Join results together
+single_prs_model_metric = rbind(all_model_metric)
+single_prs_model_performance = rbind(all_model_performance)
+single_prs_model_summary = single_prs_model_metric %>% 
+  inner_join(single_prs_model_performance)
+```
+
+
+### 3) Multiple PRS model
+```{r}
+# Stepwise selection
+intercept_only = glm(dementia ~ age + female, 
+                     data = sample_EAS_full, family = 'binomial')
+f1 = paste(names(sample_EAS_full)[names(sample_EAS_full) %!in% 
+                                    c("dementia", "e4count") ], 
+           collapse = "` + `")
+# define model with all predictors
+all = glm(paste0("dementia ~ `", f1, "`"), data = sample_EAS_full, 
+          family = 'binomial')
+# perform forward stepwise regression
+forward = step(intercept_only, direction = 'forward', 
+               scope = formula(all), trace = 0)
+forward_vars = gsub("\\+ ", "", forward$anova$Step)[2:length(forward$anova$Step)]
+forward_vars = gsub("`", "", forward_vars)
+print(forward_vars)
+```
+
+```{r}
+seed_num = 13471118
+#========= multiple PRS model =========
+# AD PRS combinations
+X = c("AD_PRS_EUR_indsig", "AD_PRS_Trans_indsig", "AD_PRS_AFR_indsig", demo_set)
+PRS.AD.indsig.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                balance_classes = T, 
+                                model_id = "AD PRS ind.sig combine", 
+                                nfolds = 5, fold_assignment = "Stratified", 
+                                seed = seed_num, family = "binomial", lambda = 0, 
+                                standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_lead", "AD_PRS_Trans_lead", "AD_PRS_AFR_lead", demo_set)
+PRS.AD.lead.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                              balance_classes = T, 
+                              model_id = "AD PRS lead combine", 
+                              nfolds = 5, fold_assignment = "Stratified", 
+                              seed = seed_num, family = "binomial", lambda = 0, 
+                              standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_map", "AD_PRS_Trans_map", "AD_PRS_AFR_map", demo_set)
+PRS.AD.map.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                             balance_classes = T, 
+                             model_id = "AD PRS map combine", 
+                             nfolds = 5, fold_assignment = "Stratified", 
+                             seed = seed_num, family = "binomial", lambda = 0, 
+                             standardize = T, keep_cross_validation_models = F)
+# AD + neuro combinations
+X = c("AD_PRS_EUR_indsig", "AD_PRS_Trans_indsig", "AD_PRS_AFR_indsig", 
+      "PD_PRS_indsig", "LBD_PRS_indsig", "PSP_PRS_indsig", 
+      "Stroke_PRS_indsig", demo_set)
+PRS.neuro.indsig.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                   balance_classes = T, 
+                                   model_id = "Neuro PRS ind.sig combine", 
+                                   nfolds = 5, fold_assignment = "Stratified", 
+                                   seed = seed_num, family = "binomial", lambda = 0, 
+                                   standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_lead", "AD_PRS_Trans_lead", "AD_PRS_AFR_lead", 
+      "PD_PRS_lead", "LBD_PRS_lead", "PSP_PRS_lead", 
+      "Stroke_PRS_lead", demo_set)
+PRS.neuro.lead.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                 balance_classes = T, 
+                                 model_id = "Neuro PRS lead combine", 
+                                 nfolds = 5, fold_assignment = "Stratified", 
+                                 seed = seed_num, family = "binomial", lambda = 0, 
+                                 standardize = T, keep_cross_validation_models = F)
+X = c("AD_PRS_EUR_map", "AD_PRS_Trans_map", "AD_PRS_AFR_map", 
+      "PD_PRS_map", "LBD_PRS_map", "PSP_PRS_map", 
+      "Stroke_PRS_map", demo_set)
+PRS.neuro.map.combine = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                                balance_classes = T,
+                                model_id = "Neuro PRS map combine", 
+                                nfolds = 5, fold_assignment = "Stratified", 
+                                seed = seed_num, family = "binomial", lambda = 0, 
+                                standardize = T, keep_cross_validation_models = F)
+# Stepwise selected PRSs
+X = c("AD_PRS_AFR_lead", "PSP_PRS_lead", demo_set) 
+PRS.neuro.select = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                           balance_classes = T, model_id = "Neuro PRS select",
+                           nfolds = 5, fold_assignment = "Stratified", 
+                           seed = seed_num, family = "binomial", lambda = 0, 
+                           standardize = T, keep_cross_validation_models = F)
+```
+
+```{r}
+all_model_metric = c()
+all_model_performance = c()
+# Extract results
+model_list = c("PRS.AD.indsig.combine", "PRS.AD.lead.combine", 
+               "PRS.AD.map.combine", "PRS.neuro.indsig.combine", 
+               "PRS.neuro.lead.combine", "PRS.neuro.map.combine", 
+               "PRS.neuro.select")
+for (i in 1:length(model_list)) {
+  print(paste0("Model: ", model_list[i]))
+  # Run extraction function
+  extract_cv = extract_cv_results(get(model_list[i]))
+  model_metric = t(extract_cv[[1]]) %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  model_performance = extract_cv[[2]] %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  if (i == 1) {
+    all_model_metric = model_metric
+    all_model_performance = model_performance
+  } else {
+    all_model_metric = rbind(all_model_metric, model_metric)
+    all_model_performance = rbind(all_model_performance, model_performance)
+  }
+}
+# Join results together
+multi_prs_model_metric = rbind(all_model_metric)
+multi_prs_model_performance = rbind(all_model_performance)
+multi_prs_model_summary = multi_prs_model_metric %>% 
+  inner_join(multi_prs_model_performance)
+
+full_prs_model_summary = rbind(single_prs_model_summary, 
+                               multi_prs_model_summary) %>% as.data.frame()
+```
+
+## 2. Weighted-SNP models
+```{r}
+snp_df_AD_indsig = sample_EAS %>% 
+  left_join(freeze60k_geno_beta_AD_indsig) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_AD_lead = sample_EAS %>% 
+  left_join(freeze60k_geno_beta_AD_lead) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_AD_map = sample_EAS %>% 
+  left_join(freeze60k_geno_beta_AD_map) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_all_indsig = sample_EAS %>% 
+  left_join(freeze60k_geno_beta_all_indsig) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_all_lead = sample_EAS %>% 
+  left_join(freeze60k_geno_beta_all_lead) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+snp_df_all_map = sample_EAS %>% 
+  left_join(freeze60k_geno_beta_all_map) %>% 
+  select(-c(UniqueSampleId, record_length, 
+            n_encounter, n_diagnosis,
+            enc_per_yr)) 
+```
+
+### Run two-step LASSO models
+```{r}
+# LASSO selected SNPs
+seed_num = 13471118
+target.train = as.h2o(snp_df_AD_indsig)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:256])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_EAS_AD_indsig = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_EAS_AD_indsig, demo_set)
+snp.lasso.AD.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                              balance_classes = T, model_id = "LASSO SNPs (AD indsig)", 
+                              nfolds = 5, fold_assignment = "Stratified", 
+                              seed = seed_num, family = "binomial",
+                              alpha = 1, lambda_search = TRUE,
+                              standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_AD_lead)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:89])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_EAS_AD_lead = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_EAS_AD_lead, demo_set)
+snp.lasso.AD.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO SNPs (AD lead)", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE,
+                            standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_AD_map)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:239])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_EAS_AD_map = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_EAS_AD_map, demo_set)
+snp.lasso.AD.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                           balance_classes = T, model_id = "LASSO SNPs (AD map)", 
+                           nfolds = 5, fold_assignment = "Stratified",
+                           seed = seed_num, family = "binomial", 
+                           alpha = 1, lambda_search = TRUE,
+                           standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_all_indsig)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:415])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_EAS_all_indsig = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_EAS_all_indsig, demo_set)
+snp.lasso.all.indsig = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                               balance_classes = T, model_id = "LASSO SNPs (all indsig)", 
+                               nfolds = 5, fold_assignment = "Stratified",
+                               seed = seed_num, family = "binomial", 
+                               alpha = 1, lambda_search = TRUE,
+                               standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_all_lead)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:142])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_EAS_all_lead = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_EAS_all_lead, demo_set)
+snp.lasso.all.lead = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                             balance_classes = T, model_id = "LASSO SNPs (all lead)", 
+                             nfolds = 5, fold_assignment = "Stratified",
+                             seed = seed_num, family = "binomial", 
+                             alpha = 1, lambda_search = TRUE,
+                             standardize = T, keep_cross_validation_models = F)
+
+target.train = as.h2o(snp_df_all_map)
+target.train[,Y] = as.factor(target.train[,Y])
+# Step 1: feature selection
+X = c(demo_set, names(target.train)[24:389])
+SNP.lasso.feature = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO features", 
+                            nfolds = 5, fold_assignment = "Stratified", 
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE, standardize = T, 
+                            keep_cross_validation_models = F)
+snps_EAS_all_map = SNP.lasso.feature@model$variable_importances %>% 
+  as.data.frame() %>% filter(variable %!in% demo_set) %>% 
+  filter(scaled_importance > 0) %>% pull(variable)
+# Step 2: fit LASSO
+X = c(snps_EAS_all_map, demo_set)
+snp.lasso.all.map = h2o.glm(training_frame = target.train, x = X, y = Y, 
+                            balance_classes = T, model_id = "LASSO SNPs (all map)", 
+                            nfolds = 5, fold_assignment = "Stratified",
+                            seed = seed_num, family = "binomial", 
+                            alpha = 1, lambda_search = TRUE,
+                            standardize = T, keep_cross_validation_models = F)
+```
+
+```{r}
+all_model_metric = c()
+all_model_performance = c()
+# Extract results
+model_list = c("snp.lasso.AD.indsig", "snp.lasso.AD.lead", 
+               "snp.lasso.AD.map", "snp.lasso.all.indsig",
+               "snp.lasso.all.lead", "snp.lasso.all.map")
+for (i in 1:length(model_list)) {
+  print(paste0("Model: ", model_list[i]))
+  # Run extraction function
+  extract_cv = extract_cv_results(get(model_list[i]))
+  model_metric = t(extract_cv[[1]]) %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  model_performance = extract_cv[[2]] %>% as.data.frame() %>% 
+    mutate(mark = model_list[i])
+  if (i == 1) {
+    all_model_metric = model_metric
+    all_model_performance = model_performance
+  } else {
+    all_model_metric = rbind(all_model_metric, model_metric)
+    all_model_performance = rbind(all_model_performance, model_performance)
+  }
+}
+# Join results together
+lasso_snp_model_metric = rbind(all_model_metric)
+lasso_snp_model_performance = rbind(all_model_performance)
+lasso_snp_model_summary = lasso_snp_model_metric %>% 
+  inner_join(lasso_snp_model_performance)
+```
+
+# Part 4. AutoML
+```{r warning=FALSE}
 target.train = as.h2o(snp_df_all_map)
 target.train[,Y] = as.factor(target.train[,Y])
 # First use the sample selection results from LASSO 
-X = c(snps_AMR_all_map, demo_set)
+X = c(snps_EAS_all_map, demo_set)
 # Run AutoML for 10 base models (limited to 1 hour max runtime by default)
 aml.full.map = h2o.automl(x = X, y = Y, training_frame = target.train, 
                           balance_classes = TRUE, max_models = 20, 
@@ -493,16 +1397,16 @@ print(lb.aml, n = nrow(lb.aml))
 ```
 
 ```{r}
-best_ensemble = h2o.getModel("StackedEnsemble_BestOfFamily_1_AutoML_3_20230501_222146")
+best_ensemble = h2o.getModel("StackedEnsemble_BestOfFamily_1_AutoML_6_20230502_173318")
 # Get the Stacked Ensemble metalearner model
 # metalearner = best_ensemble@model$metalearner_model
 # h2o.varimp(metalearner)
 # Get the "best" for each type of model
-best_gbm = h2o.getModel("GBM_1_AutoML_3_20230501_222146")
-best_glm = h2o.getModel("GLM_1_AutoML_3_20230501_222146")
-best_xgboost = h2o.getModel("XGBoost_grid_1_AutoML_3_20230501_222146_model_3")
-best_drf = h2o.getModel("DRF_1_AutoML_3_20230501_222146")
-best_xrt = h2o.getModel("XRT_1_AutoML_3_20230501_222146")
+best_gbm = h2o.getModel("GBM_1_AutoML_6_20230502_173318")
+best_glm = h2o.getModel("GLM_1_AutoML_6_20230502_173318")
+best_xgboost = h2o.getModel("XGBoost_3_AutoML_6_20230502_173318")
+best_drf = h2o.getModel("DRF_1_AutoML_6_20230502_173318")
+best_xrt = h2o.getModel("XRT_1_AutoML_6_20230502_173318")
 ```
 
 ```{r}
@@ -536,15 +1440,15 @@ aml_snp_model_summary = aml_snp_model_metric %>%
 
 ```{r}
 h2o.saveModel(best_gbm, 
-              path = paste0(raw_data_path, "modeling/AMR"))
+              path = paste0(raw_data_path, "modeling/EAS"))
 # Load model
 best_gbm = h2o.loadModel(path = paste0(raw_data_path, 
-                                       "modeling/AMR/GBM_1_AutoML_3_20230501_222146"))
+                                       "modeling/EAS/GBM_1_AutoML_6_20230502_173318"))
 
 h2o.saveModel(best_ensemble, 
-              path = paste0(raw_data_path, "modeling/AMR"))
+              path = paste0(raw_data_path, "modeling/EAS"))
 # Load model
-best_ensemble = h2o.loadModel(path = paste0(raw_data_path, "modeling/AMR/StackedEnsemble_BestOfFamily_1_AutoML_3_20230501_222146"))
+best_ensemble = h2o.loadModel(path = paste0(raw_data_path, "modeling/EAS/StackedEnsemble_BestOfFamily_1_AutoML_6_20230502_173318"))
 ```
 
 ```{r}
@@ -553,12 +1457,12 @@ full_model_summary = rbind(full_prs_model_summary,
                            aml_snp_model_summary) %>% as.data.frame()
 # Output results to table
 write.table(full_model_summary, 
-            file = paste0(output_path, "Model_performance_logistic_AMR.txt"),
+            file = paste0(output_path, "Model_performance_logistic_EAS.txt"),
             sep = "\t", quote = F, row.names = F, col.names = T)
 # h2o.shutdown(prompt = F)
 ```
 
-## 4. LASSO interation
+# Part 5. LASSO interation
 ```{r}
 random_seed_lst = sample(1:1000000, 1000, replace = FALSE)
 Y = "dementia"
@@ -589,6 +1493,5 @@ selected_snp_summary_allmap = lasso_vars_snps %>% group_by(variable) %>%
   select(variable, freq, avg_percentage) %>% unique() %>% 
   arrange(desc(avg_percentage))
 save(selected_snp_summary_allmap, 
-     file = paste0(raw_data_path, "modeling/AMR/lasso_snp_allmap.rda"))
+     file = paste0(raw_data_path, "modeling/EAS/lasso_snp_allmap.rda"))
 ```
-
