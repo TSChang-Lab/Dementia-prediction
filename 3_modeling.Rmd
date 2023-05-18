@@ -7,8 +7,8 @@ output: html_document
 
 ```{r message=FALSE, warning=FALSE}
 rm(list = ls())
-# lapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""), 
-#        detach, character.only = TRUE, unload = TRUE)
+lapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""),
+       detach, character.only = TRUE, unload = TRUE)
 pacman::p_load(tidyverse, h2o, epiflow, caret)
 raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
 output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"

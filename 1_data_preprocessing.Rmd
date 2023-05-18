@@ -282,6 +282,7 @@ dim(liftover_full) # dim = 12658,15
 liftover_full = liftover_full %>% 
   mutate(chr_pos_name1 = paste0("chr", chr, ":", pos, ":", a0, ":", a1),
          chr_pos_name2 = paste0("chr", chr, ":", pos, ":", a1, ":", a0))
+save(liftover_full, file = paste0(raw_data_path, "FUMA/liftover_full.rda"))
 name1_out = liftover_full %>% pull(chr_pos_name1) %>% unique()
 name2_out = liftover_full %>% pull(chr_pos_name2) %>% unique()
 name_out_full = c(name1_out, name2_out) %>% unique()
@@ -601,6 +602,9 @@ indsig_beta_AD_trans = info_snp$beta
 AD_trans_beta_indsig = info_snp %>% 
   select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
   dplyr::rename(beta_trans_indsig = beta)
+# Save this for future use
+save(AD_trans_beta_indsig, 
+     file = paste0(raw_data_path, "prs/mod/AD_trans_beta_indsig.rda"))
 # Filter genotype info
 genotype.targ.indsig = genotype_df %>% select(all_of(AD_trans_beta_indsig$rsid))
 genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
@@ -612,6 +616,13 @@ names(pred_prs_final) = c('AD_PRS_trans_indsig', 'FID', 'IID')
 onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
 AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_trans_indsig)
 AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_trans_indsig)
+# Save this for future use
+AD_trans_indsig_EUR_1kg_mean = AD_EUR_1kg_mean
+save(AD_trans_indsig_EUR_1kg_mean, 
+     file = paste0(raw_data_path, "prs/mod/AD_trans_indsig_EUR_1kg_mean.rda"))
+AD_trans_indsig_EUR_1kg_sd = AD_EUR_1kg_sd
+save(AD_trans_indsig_EUR_1kg_sd, 
+     file = paste0(raw_data_path, "prs/mod/AD_trans_indsig_EUR_1kg_sd.rda"))
 # Apply to ATLAS
 AD_trans_prs_indsig = pred_prs_final %>% 
   filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
@@ -672,6 +683,9 @@ map_beta_AD_trans = info_snp$beta
 AD_trans_beta_map = info_snp %>% 
   select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
   dplyr::rename(beta_trans_map = beta)
+# Save this for future use
+save(AD_trans_beta_map, 
+     file = paste0(raw_data_path, "prs/mod/AD_trans_beta_map.rda"))
 # Filter genotype info
 genotype.targ.map = genotype_df %>% select(all_of(AD_trans_beta_map$rsid))
 genotype.targ.matrix = as.matrix(genotype.targ.map[])
@@ -683,6 +697,13 @@ names(pred_prs_final) = c('AD_PRS_trans_map', 'FID', 'IID')
 onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
 AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_trans_map)
 AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_trans_map)
+# Save this for future use
+AD_trans_map_EUR_1kg_mean = AD_EUR_1kg_mean
+save(AD_trans_map_EUR_1kg_mean, 
+     file = paste0(raw_data_path, "prs/mod/AD_trans_map_EUR_1kg_mean.rda"))
+AD_trans_map_EUR_1kg_sd = AD_EUR_1kg_sd
+save(AD_trans_map_EUR_1kg_sd, 
+     file = paste0(raw_data_path, "prs/mod/AD_trans_map_EUR_1kg_sd.rda"))
 # Apply to ATLAS
 AD_trans_prs_map = pred_prs_final %>% 
   filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))

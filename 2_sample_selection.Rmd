@@ -88,6 +88,7 @@ enc_demo_map = enc_demo %>%
   left_join(PheWAS::phecode_map, by = c("vocabulary_id" = "vocabulary_id",
                                         "DiagnosisCode" = "code")) %>% unique()
 dim(enc_demo_map) # dim = (3293054,10)
+save(enc_demo_map, file = paste0(raw_data_path, "atlas/pheno/mod/enc_demo_map.rda"))
 # Dementia cases info
 dem_phecode = c("290.1", "290.11", "290.12", "290.13", "290.16")
 dem_icds = c("F01", "F01.5", "F01.50", "F01.51", "F01.511", "F01.518",
