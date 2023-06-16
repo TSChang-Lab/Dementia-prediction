@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 rm(list = ls())
-pacman::p_load(tidyverse, epiflow, gtsummary, PheWAS)
+pacman::p_load(tidyverse, epiflow, gtsummary, PheWAS, MatchIt)
 raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
 output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
 phe_table_extract_date = "2023-03-20"
@@ -65,29 +65,37 @@ load(file = paste0(raw_data_path, "atlas/geno/gen_ancestry.rda"))
 enc_demo_55 = enc_demo %>% 
   inner_join(gen_ancestry) %>% filter(age_diagnosis >= 55) 
 dim(enc_demo_55) # dim = (16398957,9)
-patient_ehr = enc_demo_55 %>% 
-  mutate(ICD_3digit = substr(DiagnosisCode, 1, 3)) %>% 
-  group_by(PatientID) %>% 
-  mutate(age_last_visit = as.numeric(max(StartDate) -BirthDate)/365.25) %>% 
+# Map to phecodes
+patient_ehr55_phecode = enc_demo_55 %>%
+  arrange(PatientID, StartDate) %>% group_by(PatientID) %>% 
+  mutate(age_last_visit = as.numeric(max(StartDate) - BirthDate)/365.25) %>% 
   mutate(record_length = as.numeric(max(StartDate) - min(StartDate))/365.25) %>% 
-  mutate(n_diagnosis = length(unique(ICD_3digit))) %>% 
   mutate(n_encounter = length(unique(StartDate))) %>% ungroup() %>% 
+  mutate(vocabulary_id = "ICD10CM") %>% 
+  left_join(PheWAS::phecode_map, by = c("vocabulary_id" = "vocabulary_id",
+                                        "DiagnosisCode" = "code")) %>% 
+  select(PatientID, UniqueSampleId, Sex, gen_ancestry, age_last_visit,
+         record_length, n_encounter, StartDate, phecode) %>% 
+  unique() %>% drop_na() %>% group_by(PatientID) %>% 
+  # define n_diagnosis by phecodes
+  mutate(n_diagnosis = length(unique(phecode))) %>% ungroup() %>% 
   select(PatientID, UniqueSampleId, Sex, gen_ancestry, age_last_visit,
          record_length, n_diagnosis, n_encounter) %>% unique() %>% 
   filter(age_last_visit >= 55 & age_last_visit < 90) %>% filter(n_encounter >= 2) 
-dim(patient_ehr) # dim = (29684,8)
+dim(patient_ehr55_phecode) # dim = (29666,8)
+save(patient_ehr55_phecode, file = paste0(raw_data_path, "atlas/pheno/mod/patient_ehr55_phecode.rda"))
 ```
 
 ## 4. Dementia phenotypes
 ```{r}
 enc_demo_map = enc_demo %>% 
-  filter(UniqueSampleId %in% patient_ehr$UniqueSampleId) %>% 
+  filter(UniqueSampleId %in% patient_ehr55_phecode$UniqueSampleId) %>% 
   group_by(UniqueSampleId, DiagnosisCode) %>% 
   arrange(StartDate) %>% slice_head(n = 1) %>% ungroup() %>% 
   mutate(vocabulary_id = "ICD10CM") %>% 
   left_join(PheWAS::phecode_map, by = c("vocabulary_id" = "vocabulary_id",
                                         "DiagnosisCode" = "code")) %>% unique()
-dim(enc_demo_map) # dim = (3293054,10)
+dim(enc_demo_map) # dim = (3292594,10)
 save(enc_demo_map, file = paste0(raw_data_path, "atlas/pheno/mod/enc_demo_map.rda"))
 # Dementia cases info
 dem_phecode = c("290.1", "290.11", "290.12", "290.13", "290.16")
@@ -102,8 +110,8 @@ dem_case_info = enc_demo_map %>%
   filter(phecode %in% dem_phecode | DiagnosisCode %in% dem_icds) %>% 
   # Collapse to first phecode encounter
   group_by(UniqueSampleId, phecode) %>% 
-  arrange(StartDate) %>% slice_head(n = 1) %>% ungroup() %>% unique() %>% 
-  select(-DiagnosisCode) %>% group_by(UniqueSampleId) %>% 
+  arrange(StartDate) %>% slice_head(n = 1) %>% ungroup() %>% 
+  select(-DiagnosisCode) %>% unique() %>% group_by(UniqueSampleId) %>% 
   mutate(dem_age_diagnosis = min(age_diagnosis),
          DementiaDate = min(StartDate)) %>% 
   select(PatientID, UniqueSampleId, DementiaDate, dem_age_diagnosis) %>% 
@@ -112,272 +120,175 @@ dim(dem_case_info) # dim = (1200,4)
 
 # Cases
 case_ehr = enc_demo_55 %>% inner_join(dem_case_info) %>% 
-  filter(StartDate <= DementiaDate) %>% 
-  mutate(ICD_3digit = substr(DiagnosisCode, 1, 3)) %>% 
-  group_by(PatientID) %>% 
-  mutate(age_last_visit = as.numeric(max(StartDate) -BirthDate)/365.25) %>% 
-  mutate(record_length = as.numeric(max(StartDate) - min(StartDate))/365.25) %>% 
-  mutate(n_diagnosis = length(unique(ICD_3digit))) %>% 
-  mutate(n_encounter = length(unique(StartDate))) %>% ungroup() %>% 
-  mutate(female = if_else(Sex == "Female", 1, 0)) %>% 
-  filter(age_last_visit >= 55 & age_last_visit < 90) %>% 
-  filter(n_encounter >= 2) %>% filter(dem_age_diagnosis >= 55) %>% 
   mutate(dementia = if_else(!is.na(DementiaDate), 1, 0)) %>% 
+  filter(StartDate <= DementiaDate) %>% filter(dem_age_diagnosis >= 55) %>% 
+  arrange(PatientID, StartDate) %>% group_by(PatientID) %>% 
+  mutate(age_last_visit = as.numeric(max(StartDate) - BirthDate)/365.25) %>% 
+  mutate(record_length = as.numeric(max(StartDate) - min(StartDate))/365.25) %>% 
+  mutate(n_encounter = length(unique(StartDate))) %>% ungroup() %>% 
+  mutate(vocabulary_id = "ICD10CM") %>% 
+  left_join(PheWAS::phecode_map, by = c("vocabulary_id" = "vocabulary_id",
+                                        "DiagnosisCode" = "code")) %>% 
+  select(PatientID, UniqueSampleId, Sex, gen_ancestry, age_last_visit,
+         record_length, n_encounter, StartDate, phecode, dementia) %>% ungroup() %>% 
+  unique() %>% drop_na() %>% group_by(PatientID) %>% 
+  # define n_diagnosis by phecodes
+  mutate(n_diagnosis = length(unique(phecode))) %>% ungroup() %>% 
+  select(PatientID, UniqueSampleId, Sex, gen_ancestry, age_last_visit,
+         record_length, n_diagnosis, n_encounter, dementia) %>% unique() %>% 
   mutate(enc_per_yr = n_encounter/record_length) %>% 
-  select(UniqueSampleId, gen_ancestry, age_last_visit, female,
+  mutate(female = if_else(Sex == "Female", 1, 0)) %>% 
+  filter(age_last_visit >= 55 & age_last_visit < 90) %>% filter(n_encounter >= 2) %>% 
+  select(UniqueSampleId, gen_ancestry, age_last_visit, female, n_encounter, n_diagnosis,
          record_length, enc_per_yr, dementia) %>% unique() %>% drop_na()
+dim(case_ehr) # dim = (1077,9)
 # Controls
-control_ehr = patient_ehr %>% left_join(dem_case_info) %>% 
+control_ehr = patient_ehr55_phecode %>% left_join(dem_case_info) %>% 
   mutate(dementia = if_else(!is.na(DementiaDate), 1, 0)) %>% 
   filter(age_last_visit >= 55 & age_last_visit < 90) %>% 
   filter(n_encounter >= 2) %>% filter(dementia == 0) %>% 
   mutate(enc_per_yr = n_encounter/record_length) %>% 
   mutate(female = if_else(Sex == "Female", 1, 0)) %>% 
-  select(UniqueSampleId, gen_ancestry, age_last_visit, female,
+  select(UniqueSampleId, gen_ancestry, age_last_visit, female, n_encounter, n_diagnosis,
          record_length, enc_per_yr, dementia) %>% unique() %>% drop_na()
+dim(control_ehr) # dim = (28466,9)
 ```
 
 ```{r}
 final_eligible = rbind(case_ehr, control_ehr) %>% as.data.frame() %>% unique()
-dim(final_eligible) # dim = (29561,7)
+dim(final_eligible) # dim = (29543,9)
 save(final_eligible, 
      file = paste0(paste0(raw_data_path, "atlas/pheno/mod/final_eligible.rda")))
 ```
 
-# Part 2. Matching
+# Part 2. Ancestry sample + matching
 ## 1. AMR
 ```{r}
-case_control_prepare_AMR = final_eligible %>% filter(gen_ancestry == "AMR") 
-# Check distribution in dementia cases/non-cases
-case_control_prepare_AMR %>% 
-  select(dementia, age_last_visit, female, record_length, enc_per_yr) %>% 
-  tbl_summary(by = dementia) %>% add_p()
-
-sample_AMR %>% select(age, female, record_length, enc_per_yr, dementia) %>% 
-  tbl_summary(by = dementia) %>% add_p()
-```
-
-```{r}
-set.seed(20224766)
-# Perform matching
-cases_pool = case_control_prepare_AMR %>% filter(dementia == 1)
-case_id_pool = cases_pool %>% pull(UniqueSampleId)
-controls_pool = case_control_prepare_AMR %>% filter(dementia == 0)
-
-final_df_prep = cases_pool
-no_control_found = c()
-control_id_full = c()
-
-for (i in 1:length(case_id_pool)) {
-  # Record case info
-  case_id = case_id_pool[i]
-  case_record_span = cases_pool %>% 
-    filter(UniqueSampleId == case_id) %>% pull(record_length)
-  case_enc_per_yr = cases_pool %>% 
-    filter(UniqueSampleId == case_id) %>% pull(enc_per_yr)
-  # Get control pools
-  control_pool_strict = controls_pool %>% 
-    filter(UniqueSampleId %!in% control_id_full) %>% 
-    filter(enc_per_yr >= case_enc_per_yr - 5 & enc_per_yr <= case_enc_per_yr + 5) %>%
-    filter(record_length >= case_record_span - 1 & record_length <= case_record_span + 1) 
-  control_pool_loose = controls_pool %>% filter(UniqueSampleId %!in% control_id_full) %>% 
-    filter(enc_per_yr >= case_enc_per_yr - 10 & enc_per_yr <= case_enc_per_yr + 10) %>%
-    filter(record_length >= case_record_span - 2 & record_length <= case_record_span + 2) 
-  # print(paste0(i, "-", case_id, ": ", nrow(control_pool_strict), " and ", nrow(control_pool_loose)))
-  if (nrow(control_pool_strict) >= 10) {
-    control_selected = control_pool_strict[sample(nrow(control_pool_strict), 10),]
-  } else if (nrow(control_pool_strict) < 10 & nrow(control_pool_strict) > 0) {
-    size_add = 10 - nrow(control_pool_strict)
-    if (nrow(control_pool_loose) >= size_add) {
-      control_selected_add = control_pool_loose[sample(nrow(control_pool_loose), size_add),]
-      control_selected = rbind(control_pool_strict, control_selected_add)
-    } else {
-      control_selected = rbind(control_pool_strict, control_pool_loose)
-    }
-  } else if (nrow(control_pool_loose) == 0) {
-    print(paste0("No control for ", case_id))
-    no_control_found = c(no_control_found, case_id)
-    control_selected = control_pool_loose
-  } else if (nrow(control_pool_loose) >= 10) {
-    control_selected = control_pool_loose[sample(nrow(control_pool_loose), 10),]
-  } else {
-    control_selected = control_pool_loose
-  }
-  control_id = control_selected %>% pull(UniqueSampleId)
-  control_id_full = c(control_id_full, control_id) %>% unique()
-  
-  final_df_prep = rbind(final_df_prep, control_selected) %>% 
-    as.data.frame() %>% unique()
-}
-length(no_control_found)
-final_df = final_df_prep %>% 
-  filter(UniqueSampleId %!in% no_control_found) %>% unique()
-dim(final_df) # dim = (1335,7)
-final_df_AMR = final_df
+final_df_AMR = final_eligible %>% filter(gen_ancestry == "AMR") 
 # add PCs info
 load(file = paste0(raw_data_path, "atlas/geno/pcs/amr_pcs.rda"))
-sample_AMR = final_df_AMR %>% 
+sample_AMR_full = final_df_AMR %>% 
   dplyr::rename("age" = "age_last_visit") %>% 
   left_join(amr_pcs) %>% 
   select(-c(gen_ancestry))
-save(sample_AMR, file = paste0(raw_data_path, "modeling/AMR/sample_AMR.rda"))
+dim(sample_AMR_full) # dim = (3317,28)
+save(sample_AMR_full, file = paste0(raw_data_path, "modeling/AMR/sample_AMR_full.rda"))
+```
+
+### Check distribution in dementia cases/non-cases
+```{r}
+sample_AMR_full %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
+```
+
+### Perform matching
+```{r}
+matchit_out = matchit(dementia ~ enc_per_yr + n_diagnosis + n_encounter + record_length, 
+                      data = sample_AMR_full, method = "nearest", ratio = 12)
+matched_data = match.data(matchit_out)
+# Output data for matching the AOU data
+matched_atlas_amr = matched_data %>% 
+  select(UniqueSampleId, age, female, dementia, n_encounter, n_diagnosis, 
+         record_length, enc_per_yr) %>% dplyr::rename("PatientID" = "UniqueSampleId")
+save(matched_atlas_amr, file = paste0(raw_data_path, "modeling/AMR/matched_atlas_amr.rda"))
+sample_AMR_final = matched_data %>% 
+  select(UniqueSampleId, age, female, dementia, PC1, PC2, PC3, PC4)
+save(sample_AMR_final, file = paste0(raw_data_path, "modeling/AMR/sample_AMR_final.rda"))
+```
+
+### Distribution check
+```{r}
+matched_data %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
 ```
 
 ## 2. AFR
 ```{r}
-case_control_prepare_AFR = final_eligible %>% 
-  filter(gen_ancestry == "AFR") 
-# Check distribution in dementia cases/non-cases
-case_control_prepare_AFR %>% 
-  select(dementia, age_last_visit, female, record_length, enc_per_yr) %>% 
-  tbl_summary(by = dementia) %>% add_p()
-
-sample_AFR %>% select(age, female, record_length, enc_per_yr, dementia) %>% 
-  tbl_summary(by = dementia) %>% add_p()
-```
-
-```{r}
-# Perform matching
-cases_pool = case_control_prepare_AFR %>% filter(dementia == 1)
-case_id_pool = cases_pool %>% pull(UniqueSampleId)
-controls_pool = case_control_prepare_AFR %>% filter(dementia == 0)
-
-final_df_prep = cases_pool
-no_control_found = c()
-control_id_full = c()
-
-for (i in 1:length(case_id_pool)) {
-  # Record case info
-  case_id = case_id_pool[i]
-  case_record_span = cases_pool %>% 
-    filter(UniqueSampleId == case_id) %>% pull(record_length)
-  case_enc_per_yr = cases_pool %>% 
-    filter(UniqueSampleId == case_id) %>% pull(enc_per_yr)
-  # Get control pools
-  control_pool_strict = controls_pool %>% 
-    filter(UniqueSampleId %!in% control_id_full) %>% 
-    filter(enc_per_yr >= case_enc_per_yr - 5 & enc_per_yr <= case_enc_per_yr + 5) %>%
-    filter(record_length >= case_record_span - 1 & record_length <= case_record_span + 1) 
-  control_pool_loose = controls_pool %>% filter(UniqueSampleId %!in% control_id_full) %>% 
-    filter(enc_per_yr >= case_enc_per_yr - 10 & enc_per_yr <= case_enc_per_yr + 10) %>%
-    filter(record_length >= case_record_span - 2 & record_length <= case_record_span + 2) 
-  print(paste0(i, "-", case_id, ": ", nrow(control_pool_strict), " and ", nrow(control_pool_loose)))
-  if (nrow(control_pool_strict) >= 10) {
-    control_selected = control_pool_strict[sample(nrow(control_pool_strict), 10),]
-  } else if (nrow(control_pool_strict) < 10 & nrow(control_pool_strict) > 0) {
-    size_add = 10 - nrow(control_pool_strict)
-    if (nrow(control_pool_loose) >= size_add) {
-      control_selected_add = control_pool_loose[sample(nrow(control_pool_loose), size_add),]
-      control_selected = rbind(control_pool_strict, control_selected_add)
-    } else {
-      control_selected = rbind(control_pool_strict, control_pool_loose)
-    }
-  } else if (nrow(control_pool_loose) == 0) {
-    print(paste0("No control for ", case_id))
-    no_control_found = c(no_control_found, case_id)
-    control_selected = control_pool_loose
-  } else if (nrow(control_pool_loose) >= 10) {
-    control_selected = control_pool_loose[sample(nrow(control_pool_loose), 10),]
-  } else {
-    control_selected = control_pool_loose
-  }
-  control_id = control_selected %>% pull(UniqueSampleId)
-  print(length(control_id))
-  control_id_full = c(control_id_full, control_id) %>% unique()
-  
-  final_df_prep = rbind(final_df_prep, control_selected) %>% 
-    as.data.frame() %>% unique()
-}
-length(no_control_found)
-final_df = final_df_prep %>% 
-  filter(UniqueSampleId %!in% no_control_found) %>% unique()
-dim(final_df) # dim = (847,7)
-final_df_AFR = final_df
+final_df_AFR = final_eligible %>% filter(gen_ancestry == "AFR") 
 # add PCs info
 load(file = paste0(raw_data_path, "atlas/geno/pcs/afr_pcs.rda"))
-sample_AFR = final_df_AFR %>% 
+sample_AFR_full = final_df_AFR %>% 
   dplyr::rename("age" = "age_last_visit") %>% 
   left_join(afr_pcs) %>% 
   select(-c(gen_ancestry))
-save(sample_AFR, file = paste0(raw_data_path, "modeling/AFR/sample_AFR.rda"))
+dim(sample_AFR_full) # dim = (1602,28)
+save(sample_AFR_full, file = paste0(raw_data_path, "modeling/AFR/sample_AFR_full.rda"))
+```
+
+### Check distribution in dementia cases/non-cases
+```{r}
+sample_AFR_full %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
+```
+
+### Perform matching
+```{r}
+matchit_out = matchit(dementia ~ enc_per_yr + n_diagnosis + n_encounter + record_length, 
+                      data = sample_AFR_full, method = "nearest", ratio = 12)
+matched_data = match.data(matchit_out)
+# Output data for matching the AOU data
+matched_atlas_afr = matched_data %>% 
+  select(UniqueSampleId, age, female, dementia, n_encounter, n_diagnosis, 
+         record_length, enc_per_yr) %>% dplyr::rename("PatientID" = "UniqueSampleId")
+save(matched_atlas_afr, file = paste0(raw_data_path, "modeling/AFR/matched_atlas_afr.rda"))
+sample_AFR_final = matched_data %>% 
+  select(UniqueSampleId, age, female, dementia, PC1, PC2, PC3, PC4)
+save(sample_AFR_final, file = paste0(raw_data_path, "modeling/AFR/sample_AFR_final.rda"))
+```
+
+### Distribution check
+```{r}
+matched_data %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
 ```
 
 ## 3. EAS
 ```{r}
-case_control_prepare_EAS = final_eligible %>% 
-  filter(gen_ancestry == "EAS") 
-# Check distribution in dementia cases/non-cases
-case_control_prepare_EAS %>% 
-  select(dementia, age_last_visit, female, record_length, enc_per_yr) %>% 
-  tbl_summary(by = dementia) %>% add_p()
-
-sample_EAS %>% select(age, female, record_length, enc_per_yr, dementia) %>% 
-  tbl_summary(by = dementia) %>% add_p()
-```
-
-```{r}
-# Perform matching
-cases_pool = case_control_prepare_EAS %>% filter(dementia == 1)
-case_id_pool = cases_pool %>% pull(UniqueSampleId)
-controls_pool = case_control_prepare_EAS %>% filter(dementia == 0)
-
-final_df_prep = cases_pool
-no_control_found = c()
-control_id_full = c()
-
-for (i in 1:length(case_id_pool)) {
-  # Record case info
-  case_id = case_id_pool[i]
-  case_record_span = cases_pool %>% 
-    filter(UniqueSampleId == case_id) %>% pull(record_length)
-  case_enc_per_yr = cases_pool %>% 
-    filter(UniqueSampleId == case_id) %>% pull(enc_per_yr)
-  # Get control pools
-  control_pool_strict = controls_pool %>% 
-    filter(UniqueSampleId %!in% control_id_full) %>% 
-    filter(enc_per_yr >= case_enc_per_yr - 5 & enc_per_yr <= case_enc_per_yr + 5) %>%
-    filter(record_length >= case_record_span - 1 & record_length <= case_record_span + 1) 
-  control_pool_loose = controls_pool %>% filter(UniqueSampleId %!in% control_id_full) %>% 
-    filter(enc_per_yr >= case_enc_per_yr - 10 & enc_per_yr <= case_enc_per_yr + 10) %>%
-    filter(record_length >= case_record_span - 2 & record_length <= case_record_span + 2) 
-  print(paste0(i, "-", case_id, ": ", nrow(control_pool_strict), " and ", nrow(control_pool_loose)))
-  if (nrow(control_pool_strict) >= 10) {
-    control_selected = control_pool_strict[sample(nrow(control_pool_strict), 10),]
-  } else if (nrow(control_pool_strict) < 10 & nrow(control_pool_strict) > 0) {
-    size_add = 10 - nrow(control_pool_strict)
-    if (nrow(control_pool_loose) >= size_add) {
-      control_selected_add = control_pool_loose[sample(nrow(control_pool_loose), size_add),]
-      control_selected = rbind(control_pool_strict, control_selected_add)
-    } else {
-      control_selected = rbind(control_pool_strict, control_pool_loose)
-    }
-  } else if (nrow(control_pool_loose) == 0) {
-    print(paste0("No control for ", case_id))
-    no_control_found = c(no_control_found, case_id)
-    control_selected = control_pool_loose
-  } else if (nrow(control_pool_loose) >= 10) {
-    control_selected = control_pool_loose[sample(nrow(control_pool_loose), 10),]
-  } else {
-    control_selected = control_pool_loose
-  }
-  control_id = control_selected %>% pull(UniqueSampleId)
-  print(length(control_id))
-  control_id_full = c(control_id_full, control_id) %>% unique()
-  
-  final_df_prep = rbind(final_df_prep, control_selected) %>% 
-    as.data.frame() %>% unique()
-}
-length(no_control_found)
-final_df = final_df_prep %>% 
-  filter(UniqueSampleId %!in% no_control_found) %>% unique()
-dim(final_df) # dim = (814,7)
-final_df_EAS = final_df
+final_df_EAS = final_eligible %>% filter(gen_ancestry == "EAS") 
 # add PCs info
 load(file = paste0(raw_data_path, "atlas/geno/pcs/eas_pcs.rda"))
-sample_EAS = final_df_EAS %>% 
+sample_EAS_full = final_df_EAS %>% 
   dplyr::rename("age" = "age_last_visit") %>% 
   left_join(eas_pcs) %>% 
   select(-c(gen_ancestry))
-save(sample_EAS, file = paste0(raw_data_path, "modeling/EAS/sample_EAS.rda"))
+dim(sample_EAS_full) # dim = (2516,28)
+save(sample_EAS_full, file = paste0(raw_data_path, "modeling/EAS/sample_EAS_full.rda"))
 ```
+
+### Check distribution in dementia cases/non-cases
+```{r}
+sample_EAS_full %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
+```
+
+### Perform matching
+```{r}
+matchit_out = matchit(dementia ~ enc_per_yr + n_diagnosis + n_encounter + record_length, 
+                      data = sample_EAS_full, method = "nearest", ratio = 12)
+matched_data = match.data(matchit_out)
+# Output data for matching the AOU data
+matched_atlas_eas = matched_data %>% 
+  select(UniqueSampleId, age, female, dementia, n_encounter, n_diagnosis, 
+         record_length, enc_per_yr) %>% dplyr::rename("PatientID" = "UniqueSampleId")
+save(matched_atlas_eas, file = paste0(raw_data_path, "modeling/EAS/matched_atlas_eas.rda"))
+sample_EAS_final = matched_data %>% 
+  select(UniqueSampleId, age, female, dementia, PC1, PC2, PC3, PC4)
+save(sample_EAS_final, file = paste0(raw_data_path, "modeling/EAS/sample_EAS_final.rda"))
+```
+
+### Distribution check
+```{r}
+matched_data %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
+```
+
+
+
+
 
