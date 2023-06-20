@@ -398,6 +398,7 @@ snps_AMR_all_map = SNP.lasso.feature@model$variable_importances %>%
   as.data.frame() %>% filter(variable %!in% demo_set) %>% 
   filter(scaled_importance > 0) %>% pull(variable)
 print(length(snps_AMR_all_map))
+save(snps_AMR_all_map, file = paste0(raw_data_path, "Interpretation/snps_AMR_all_map.rda"))
 # Step 2: fit LASSO
 X = c(snps_AMR_all_map, demo_set)
 aml_all_map = h2o.automl(x = X, y = Y, training_frame = target.train, 
@@ -405,6 +406,8 @@ aml_all_map = h2o.automl(x = X, y = Y, training_frame = target.train,
                            seed = seed_num, sort_metric = "AUCPR", 
                            include_algos = "GLM")
 snp.lasso.all.map = aml_all_map@leader
+varimp_AMR_all_map = snp.lasso.all.map@model$variable_importances
+save(varimp_AMR_all_map, file = paste0(raw_data_path, "Interpretation/varimp_AMR_all_map.rda"))
 ```
 
 ```{r}
@@ -870,6 +873,7 @@ snps_AFR_all_map = SNP.lasso.feature@model$variable_importances %>%
   as.data.frame() %>% filter(variable %!in% demo_set) %>% 
   filter(scaled_importance > 0) %>% pull(variable)
 print(length(snps_AFR_all_map))
+save(snps_AFR_all_map, file = paste0(raw_data_path, "Interpretation/snps_AFR_all_map.rda"))
 # Step 2: fit LASSO
 X = c(snps_AFR_all_map, demo_set)
 aml_all_map = h2o.automl(x = X, y = Y, training_frame = target.train, 
@@ -877,6 +881,8 @@ aml_all_map = h2o.automl(x = X, y = Y, training_frame = target.train,
                            seed = seed_num, sort_metric = "AUCPR", 
                            include_algos = "GLM")
 snp.lasso.all.map = aml_all_map@leader
+varimp_AFR_all_map = snp.lasso.all.map@model$variable_importances
+save(varimp_AFR_all_map, file = paste0(raw_data_path, "Interpretation/varimp_AFR_all_map.rda"))
 ```
 
 ```{r}
@@ -1343,6 +1349,7 @@ snps_EAS_all_map = SNP.lasso.feature@model$variable_importances %>%
   as.data.frame() %>% filter(variable %!in% demo_set) %>% 
   filter(scaled_importance > 0) %>% pull(variable)
 print(length(snps_EAS_all_map))
+save(snps_EAS_all_map, file = paste0(raw_data_path, "Interpretation/snps_EAS_all_map.rda"))
 # Step 2: fit LASSO
 X = c(snps_EAS_all_map, demo_set)
 aml_all_map = h2o.automl(x = X, y = Y, training_frame = target.train, 
@@ -1350,6 +1357,8 @@ aml_all_map = h2o.automl(x = X, y = Y, training_frame = target.train,
                            seed = seed_num, sort_metric = "AUCPR", 
                            include_algos = "GLM")
 snp.lasso.all.map = aml_all_map@leader
+varimp_EAS_all_map = snp.lasso.all.map@model$variable_importances
+save(varimp_EAS_all_map, file = paste0(raw_data_path, "Interpretation/varimp_EAS_all_map.rda"))
 ```
 
 ```{r}
