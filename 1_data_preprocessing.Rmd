@@ -499,6 +499,9 @@ indsig_beta_AD_AFR = info_snp$beta
 AD_AFR_beta_indsig = info_snp %>% 
   select(rsid, chr, pos, a0, a1, beta, gwasP) %>% 
   dplyr::rename(beta_AFR_indsig = beta)
+# Save this for future use
+save(AD_AFR_beta_indsig, 
+     file = paste0(raw_data_path, "prs/mod/AD_AFR_beta_indsig.rda"))
 # Filter genotype info
 genotype.targ.indsig = genotype_df_fam %>% select(all_of(AD_AFR_beta_indsig$rsid))
 genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
@@ -509,7 +512,13 @@ names(pred_prs_final) = c('AD_PRS_AFR_indsig', 'FID', 'IID')
 # Normalization
 onekg_EUR = pred_prs_final %>% filter(FID == "EUR")
 AD_EUR_1kg_mean = mean(onekg_EUR$AD_PRS_AFR_indsig)
+AD_AFR_indsig_EUR_1kg_mean = AD_EUR_1kg_mean
+save(AD_AFR_indsig_EUR_1kg_mean, 
+     file = paste0(raw_data_path, "prs/mod/AD_AFR_indsig_EUR_1kg_mean.rda"))
 AD_EUR_1kg_sd = sd(onekg_EUR$AD_PRS_AFR_indsig)
+AD_AFR_indsig_EUR_1kg_sd = AD_EUR_1kg_sd
+save(AD_AFR_indsig_EUR_1kg_sd, 
+     file = paste0(raw_data_path, "prs/mod/AD_AFR_indsig_EUR_1kg_sd.rda"))
 # Apply to ATLAS
 AD_AFR_prs_indsig = pred_prs_final %>% 
   filter(FID %!in% c("EUR", "AFR", "AMR", "EAS", "SAS"))
