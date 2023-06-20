@@ -249,3 +249,100 @@ upset(genes_df_combined, sets = c("AMR_specific", "AFR_specific", "EAS_specific"
 dev.off()
 ```
 
+# Part 4. Variable importance
+## 1. AMR
+```{r}
+load(file = paste0(raw_data_path, "Interpretation/varimp_AMR_all_map.rda"))
+AMR_snp = read.table(file = paste0(output_path, "interpretation/amr_snps_info.txt"), 
+                      header = T, sep = "\t", fill = T)
+varimp_AMR_top10 = varimp_AMR_all_map %>% head(10) %>% 
+  separate(variable, into = c("chr", "pos", "a0", "a1"), remove = FALSE) %>% 
+  mutate(chr = as.numeric(substr(chr, 4, 1000000L)),
+         pos = as.numeric(pos)) %>% 
+  left_join(AMR_snp, by = c("chr", "pos")) %>% 
+  mutate(feature = case_when(
+    variable == "age" ~ "age",
+    TRUE ~ rsID
+  )) %>% select(feature, scaled_importance, chr, pos, CADD, nearestGene, dist, 
+                func, AD_EUR, AD_AFR, AD_Trans, LBD, PD, PSP, STROKE)
+varimp_AMR_top10$feature = with(varimp_AMR_top10, reorder(feature, scaled_importance))
+# Plot the coefficients
+pdf(paste0(output_path, "varimp_AMR.pdf"), width = 4, height = 3)
+ggplot(varimp_AMR_top10, 
+       aes(x = feature, y = scaled_importance)) + 
+  geom_bar(stat = "identity") +
+  coord_flip() + 
+  scale_y_continuous(limits = c(0, 1)) + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+dev.off()
+write.table(varimp_AMR_top10, 
+            file = paste0(output_path, "interpretation/varimp_AMR_top10.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 2. AFR
+```{r}
+load(file = paste0(raw_data_path, "Interpretation/varimp_AFR_all_map.rda"))
+AFR_snp = read.table(file = paste0(output_path, "interpretation/afr_snps_info.txt"), 
+                      header = T, sep = "\t", fill = T)
+varimp_AFR_top10 = varimp_AFR_all_map %>% head(10) %>% 
+  separate(variable, into = c("chr", "pos", "a0", "a1"), remove = FALSE) %>% 
+  mutate(chr = as.numeric(substr(chr, 4, 1000000L)),
+         pos = as.numeric(pos)) %>% 
+  left_join(AFR_snp, by = c("chr", "pos")) %>% 
+  mutate(feature = case_when(
+    variable == "age" ~ "age",
+    TRUE ~ rsID
+  )) %>% select(feature, scaled_importance, chr, pos, CADD, nearestGene, dist, 
+                func, AD_EUR, AD_AFR, AD_Trans, LBD, PD, PSP, STROKE)
+varimp_AFR_top10$feature = with(varimp_AFR_top10, reorder(feature, scaled_importance))
+# Plot the coefficients
+pdf(paste0(output_path, "varimp_AFR.pdf"), width = 4, height = 3)
+ggplot(varimp_AFR_top10, 
+       aes(x = feature, y = scaled_importance)) + 
+  geom_bar(stat = "identity") +
+  coord_flip() + 
+  scale_y_continuous(limits = c(0, 1)) + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+dev.off()
+write.table(varimp_AFR_top10, 
+            file = paste0(output_path, "interpretation/varimp_AFR_top10.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 3. EAS
+```{r}
+load(file = paste0(raw_data_path, "Interpretation/varimp_EAS_all_map.rda"))
+EAS_snp = read.table(file = paste0(output_path, "interpretation/eas_snps_info.txt"), 
+                      header = T, sep = "\t", fill = T)
+varimp_EAS_top10 = varimp_EAS_all_map %>% head(10) %>% 
+  separate(variable, into = c("chr", "pos", "a0", "a1"), remove = FALSE) %>% 
+  mutate(chr = as.numeric(substr(chr, 4, 1000000L)),
+         pos = as.numeric(pos)) %>% 
+  left_join(EAS_snp, by = c("chr", "pos")) %>% 
+  mutate(feature = case_when(
+    variable == "age" ~ "age",
+    TRUE ~ rsID
+  )) %>% select(feature, scaled_importance, chr, pos, CADD, nearestGene, dist, 
+                func, AD_EUR, AD_AFR, AD_Trans, LBD, PD, PSP, STROKE)
+varimp_EAS_top10$feature = with(varimp_EAS_top10, reorder(feature, scaled_importance))
+# Plot the coefficients
+pdf(paste0(output_path, "varimp_EAS.pdf"), width = 4, height = 3)
+ggplot(varimp_EAS_top10, 
+       aes(x = feature, y = scaled_importance)) + 
+  geom_bar(stat = "identity") +
+  coord_flip() + 
+  scale_y_continuous(limits = c(0, 1)) + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+dev.off()
+write.table(varimp_EAS_top10, 
+            file = paste0(output_path, "interpretation/varimp_EAS_top10.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
