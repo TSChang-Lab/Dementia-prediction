@@ -1,0 +1,94 @@
+---
+title: "Sup3_FUMA_cleaning"
+author: "Joy_Fu"
+date: "2023-06-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+# lapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""),
+#        detach, character.only = TRUE, unload = TRUE)
+pacman::p_load(tidyverse, epiflow)
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/functions.R")
+```
+
+## 1. Combine all SNP info
+```{r}
+AD_EUR_info = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_EUR/snps.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(uniqID, rsID, CADD, nearestGene, dist, func, posMapFilt, eqtlMapFilt, 
+         ciMapFilt, IndSigSNP) %>% mutate(phenotype = "AD_EUR")
+AD_AFR_info = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_AFR/snps.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(uniqID, rsID, CADD, nearestGene, dist, func, posMapFilt, eqtlMapFilt, 
+         ciMapFilt, IndSigSNP) %>% mutate(phenotype = "AD_AFR")
+AD_trans_info = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_trans/snps.txt"), 
+                           header = T, sep = "\t", fill = T) %>% 
+  select(uniqID, rsID, CADD, nearestGene, dist, func, posMapFilt, eqtlMapFilt, 
+         ciMapFilt, IndSigSNP) %>% mutate(phenotype = "AD_trans")
+PD_info = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PD/snps.txt"), 
+                     header = T, sep = "\t", fill = T) %>% 
+  select(uniqID, rsID, CADD, nearestGene, dist, func, posMapFilt, eqtlMapFilt, 
+         ciMapFilt, IndSigSNP) %>% mutate(phenotype = "PD")
+PSP_info = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PSP/snps.txt"), 
+                     header = T, sep = "\t", fill = T) %>% 
+  select(uniqID, rsID, CADD, nearestGene, dist, func, posMapFilt, eqtlMapFilt, 
+         ciMapFilt, IndSigSNP) %>% mutate(phenotype = "PSP")
+LBD_info = read.table(file = paste0(raw_data_path, "FUMA/FUMA_LBD/snps.txt"), 
+                     header = T, sep = "\t", fill = T) %>% 
+  select(uniqID, rsID, CADD, nearestGene, dist, func, posMapFilt, eqtlMapFilt, 
+         ciMapFilt, IndSigSNP) %>% mutate(phenotype = "LBD")
+STROKE_info = read.table(file = paste0(raw_data_path, "FUMA/FUMA_STROKE/snps.txt"), 
+                     header = T, sep = "\t", fill = T) %>% 
+  select(uniqID, rsID, CADD, nearestGene, dist, func, posMapFilt, eqtlMapFilt, 
+         ciMapFilt, IndSigSNP) %>% mutate(phenotype = "STROKE")
+snp_info_full = rbind(AD_EUR_info, AD_AFR_info, AD_trans_info, PD_info, 
+                      PSP_info, LBD_info, STROKE_info) %>% 
+  select(-c(uniqID, IndSigSNP, phenotype)) %>% unique() %>% drop_na()
+dim(snp_info_full) # (11895,8)
+save(snp_info_full, file = paste0(raw_data_path, "Interpretation/info_tbl/snp_info_full.rda"))
+```
+
+```{r}
+snp_info_combine = rbind(AD_EUR_info, AD_AFR_info, AD_trans_info, PD_info, 
+                         PSP_info, LBD_info, STROKE_info) %>% as.data.frame() %>% 
+  select(uniqID, rsID) %>% unique()
+save(snp_info_combine, file = paste0(raw_data_path, "Interpretation/info_tbl/snp_info_combine.rda"))
+```
+
+
+## 2. Combine all gene info
+```{r}
+AD_EUR_genes = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_EUR/genes.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(ensg, symbol, chr, start, end, type, posMapSNPs, eqtlMapSNPs, eqtlDirection, ciMapts, IndSigSNPs) 
+AD_AFR_genes = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_AFR/genes.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(ensg, symbol, chr, start, end, type, posMapSNPs, eqtlMapSNPs, eqtlDirection, ciMapts, IndSigSNPs) 
+AD_trans_genes = read.table(file = paste0(raw_data_path, "FUMA/FUMA_AD_trans/genes.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(ensg, symbol, chr, start, end, type, posMapSNPs, eqtlMapSNPs, eqtlDirection, ciMapts, IndSigSNPs) 
+LBD_genes = read.table(file = paste0(raw_data_path, "FUMA/FUMA_LBD/genes.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(ensg, symbol, chr, start, end, type, posMapSNPs, eqtlMapSNPs, eqtlDirection, ciMapts, IndSigSNPs) 
+PD_genes = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PD/genes.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(ensg, symbol, chr, start, end, type, posMapSNPs, eqtlMapSNPs, eqtlDirection, ciMapts, IndSigSNPs) 
+PSP_genes = read.table(file = paste0(raw_data_path, "FUMA/FUMA_PSP/genes.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(ensg, symbol, chr, start, end, type, posMapSNPs, eqtlMapSNPs, eqtlDirection, ciMapts, IndSigSNPs) 
+STROKE_genes = read.table(file = paste0(raw_data_path, "FUMA/FUMA_STROKE/genes.txt"), 
+                         header = T, sep = "\t", fill = T) %>% 
+  select(ensg, symbol, chr, start, end, type, posMapSNPs, eqtlMapSNPs, eqtlDirection, ciMapts, IndSigSNPs) 
+gene_info_full = rbind(AD_EUR_genes, AD_AFR_genes, AD_trans_genes, LBD_genes,
+                       PD_genes, PSP_genes, STROKE_genes) %>% unique()
+save(gene_info_full, file = paste0(raw_data_path, "Interpretation/info_tbl/gene_info_full.rda"))
+```
