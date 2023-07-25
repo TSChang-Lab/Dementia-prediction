@@ -30,8 +30,8 @@ load(file = paste0(raw_data_path, "Interpretation/info_tbl/gene_info_full.rda"))
 load(file = paste0(raw_data_path, "Interpretation/info_tbl/snp_info_full.rda"))
 load(file = paste0(raw_data_path, "Interpretation/info_tbl/snp_info_combine.rda"))
 # Load selected SNPs
-# load(file = paste0(raw_data_path, "Interpretation/snps_AMR_all_map.rda"))
-# load(file = paste0(raw_data_path, "Interpretation/snps_AFR_all_map.rda"))
+load(file = paste0(raw_data_path, "Interpretation/snps_AMR_all_map.rda"))
+load(file = paste0(raw_data_path, "Interpretation/snps_AFR_all_map.rda"))
 load(file = paste0(raw_data_path, "Interpretation/snps_EAS_all_map.rda"))
 # Read in all eqtl/ci data
 source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/read_FUMA.R")

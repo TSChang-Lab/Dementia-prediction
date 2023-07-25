@@ -409,5 +409,55 @@ names(lasso_snp)[1] = "PatientID"
 save(lasso_snp, file = paste0(raw_data_path, "AOU/lasso_snp.rda"))
 ```
 
+## 5. PCA of samples
+### AMR
+```{r}
+load(file = paste0(raw_data_path, "modeling/AMR/sample_AMR_final.rda"))
+# get UCLA ATLAS patient ID for filtering
+amr_id = sample_AMR_final %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  as.data.frame() %>% mutate(IID = UniqueSampleId) %>% 
+  select(UniqueSampleId, IID)
+names(amr_id) = c("FID", "IID")
+write.table(amr_id, 
+            file = paste0(output_path, "AOU_validation/AMR/amr_id.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+
+```{r}
+AMR_snps = read.table(file = paste0(output_path, "AOU_validation/AMR/map_index.txt"), 
+                      header = F, sep = "\t", fill = T)
+AMR_snps_sep = AMR_snps %>% 
+  separate(V1, into = c("chr", "start", "ref", "alt"), 
+           sep = ":", remove = TRUE) %>% 
+  mutate(stop = as.character(as.numeric(start) + 1)) %>% unique() %>% 
+  select(chr, start, stop, ref, alt)
+dim(AMR_snps_sep) # (578675,5)
+# Write output for snp extraction on AOU server
+AMR_snps_sep1 = AMR_snps_sep %>% head(200000)
+AMR_snps_sep2 = AMR_snps_sep[200001:400000,]
+AMR_snps_sep3 = AMR_snps_sep[400001:578675,]
+write.table(AMR_snps_sep3, 
+            file = paste0(output_path, "AOU_validation/AMR/AMR_snps_sep3.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+
+### AFR
+```{r}
+load(file = paste0(raw_data_path, "modeling/AFR/sample_AFR_final.rda"))
+# get UCLA ATLAS patient ID for filtering
+afr_id = sample_AFR_final %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  as.data.frame() %>% mutate(IID = UniqueSampleId) %>% 
+  select(UniqueSampleId, IID)
+names(afr_id) = c("FID", "IID")
+write.table(afr_id, 
+            file = paste0(output_path, "AOU_validation/AFR/afr_id.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+
 
 

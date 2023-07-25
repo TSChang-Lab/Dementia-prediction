@@ -41,3 +41,9 @@ extract_cv_results = function(model_name) {
   result_lst = c(result_lst, perform_vec)
   return(result_lst)
 }
+
+# get upper triangle of the correlation matrix
+get_upper_tri = function(cormat){
+  cormat[lower.tri(cormat)] = NA
+  return(cormat)
+}

@@ -433,6 +433,11 @@ final_AOU_AMR = rbind(matched_case_db, matched_control_db) %>%
   as.data.frame() %>% filter(db == 0) 
 dim(final_AOU_AMR) # (1553,103)
 save(final_AOU_AMR, file = paste0(raw_data_path, "modeling/AMR/final_AOU_AMR.rda"))
+final_AOU_AMR_id = final_AOU_AMR %>% select(PatientID) %>% 
+  mutate(FID = 0) %>% rename("IID" = "PatientID") %>% 
+  select(FID, IID)
+write.table(final_AOU_AMR_id, file = paste0(raw_data_path, 'modeling/AMR/final_AOU_AMR_id.txt'),
+            sep = " ", quote = F, row.names = F, col.names = F)
 ```
 
 ### 3. Perform testing
@@ -548,6 +553,11 @@ final_AOU_AFR = rbind(matched_case_db, matched_control_db) %>%
   as.data.frame() %>% filter(db == 0) 
 dim(final_AOU_AFR) # (1092,103)
 save(final_AOU_AFR, file = paste0(raw_data_path, "modeling/AFR/final_AOU_AFR.rda"))
+final_AOU_AFR_id = final_AOU_AFR %>% select(PatientID) %>% 
+  mutate(FID = 0) %>% rename("IID" = "PatientID") %>% 
+  select(FID, IID)
+write.table(final_AOU_AFR_id, file = paste0(raw_data_path, 'modeling/AFR/final_AOU_AFR_id.txt'),
+            sep = " ", quote = F, row.names = F, col.names = F)
 ```
 
 ### 3. Perform testing

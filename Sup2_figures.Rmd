@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 rm(list = ls())
-pacman::p_load(tidyverse, fmsb, UpSetR)
+pacman::p_load(tidyverse, fmsb, UpSetR, reshape)
 raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
 output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
 # Source in useful functions
@@ -343,6 +343,65 @@ ggplot(varimp_EAS_top10,
 dev.off()
 write.table(varimp_EAS_top10, 
             file = paste0(output_path, "interpretation/varimp_EAS_top10.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+# Part 5. Pairwise PRS associations
+```{r}
+load(file = paste0(raw_data_path, "prs/mod/atlas_prs_final.rda"))
+load(file = paste0(raw_data_path, "modeling/AMR/sample_AMR_final.rda"))
+load(file = paste0(raw_data_path, "modeling/AFR/sample_AFR_final.rda"))
+load(file = paste0(raw_data_path, "modeling/EAS/sample_EAS_final.rda"))
+```
+
+## 1. AMR
+```{r}
+sample_AMR_prs = sample_AMR_final %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  left_join(atlas_prs_final) %>% column_to_rownames(var = "UniqueSampleId") %>% 
+  select(-c(gen_ancestry, APOE, e2count)) %>% drop_na()
+dim(sample_AMR_prs) # dim = (1638,29)
+# select numeric variables
+amr_corr = sample_AMR_prs %>% select(contains("indsig"), contains("map"))
+cor_amr = round(cor(amr_corr, use = "complete.obs"), 2)
+upper_tri = get_upper_tri(cor_amr)
+melted_cormat = melt(cor_amr, na.rm = T)
+write.table(melted_cormat, 
+            file = paste0(output_path, "AMR_PRS_corr.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 2. AFR
+```{r}
+sample_AFR_prs = sample_AFR_final %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  left_join(atlas_prs_final) %>% column_to_rownames(var = "UniqueSampleId") %>% 
+  select(-c(gen_ancestry, APOE, e2count)) %>% drop_na()
+dim(sample_AFR_prs) # dim = (1092,29)
+# select numeric variables
+afr_corr = sample_AFR_prs %>% select(contains("indsig"), contains("map"))
+cor_afr = round(cor(afr_corr, use = "complete.obs"), 2)
+upper_tri = get_upper_tri(cor_afr)
+melted_cormat = melt(cor_afr, na.rm = T)
+write.table(melted_cormat, 
+            file = paste0(output_path, "AFR_PRS_corr.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 3. EAS
+```{r}
+sample_EAS_prs = sample_EAS_final %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  left_join(atlas_prs_final) %>% column_to_rownames(var = "UniqueSampleId") %>% 
+  select(-c(gen_ancestry, APOE, e2count)) %>% drop_na()
+dim(sample_EAS_prs) # dim = (975,29)
+# select numeric variables
+eas_corr = sample_EAS_prs %>% select(contains("indsig"), contains("map"))
+cor_eas = round(cor(eas_corr, use = "complete.obs"), 2)
+upper_tri = get_upper_tri(cor_eas)
+melted_cormat = melt(cor_eas, na.rm = T)
+write.table(melted_cormat, 
+            file = paste0(output_path, "EAS_PRS_corr.txt"),
             sep = "\t", quote = F, row.names = F, col.names = T)
 ```
 
