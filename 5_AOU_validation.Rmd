@@ -1,0 +1,323 @@
+---
+title: "4_AOU_validation"
+author: "Joy_Fu"
+date: "2023-05-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+# lapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""),
+#        detach, character.only = TRUE, unload = TRUE)
+pacman::p_load(tidyverse, h2o, caret, gtsummary, MatchIt, PRROC, pROC)
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/functions.R")
+```
+
+# Part 1. AMR validation
+## 1. Data preparation
+### PRS/APOE models
+```{r}
+# h2o.shutdown(prompt = F)
+# h2o.init(nthreads = -1)
+load(file = paste0(raw_data_path, "modeling/AMR/feature_PRS_full.rda"))
+max_boot = max(feature_PRS_full$bootstrap)
+# AD AFR indsig PRS
+coef_prs_AFR_indsig = feature_PRS_full %>% 
+  filter(model == "PRS_AFR_indsig") %>% group_by(variable) %>% 
+  summarise(n = n(), mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  mutate(var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_coef, var_coef)
+# AD AFR map PRS
+coef_prs_AFR_map = feature_PRS_full %>% 
+  filter(model == "PRS_AFR_map") %>% group_by(variable) %>% 
+  summarise(n = n(), mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  mutate(var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_coef, var_coef)
+# e4count
+coef_apoe = feature_PRS_full %>% 
+  filter(model == "e4count") %>% group_by(variable) %>% 
+  summarise(n = n(), mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  mutate(var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_coef, var_coef)
+```
+
+### SNP models
+```{r}
+# h2o.shutdown(prompt = F)
+# h2o.init(nthreads = -1)
+load(file = paste0(raw_data_path, "modeling/AMR/feature_map_full.rda"))
+max_boot = max(feature_map_full$bootstrap)
+coef_map_summary = feature_map_full %>% 
+  group_by(variable) %>% 
+  summarise(n = n(), mean_imp = mean(percentage, na.rm = T), 
+            lower_imp = quantile(percentage, 0.025, na.rm = T),
+            upper_imp = quantile(percentage, 0.975, na.rm = T),
+            mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  arrange(desc(mean_imp)) %>% filter(n >= max_boot * 0.95) %>% 
+  mutate(var_imp = paste0(round(mean_imp, 3), " (", 
+                 round(lower_imp, 3), ", ", round(upper_imp, 3), ")"),
+         var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_imp, var_imp, mean_coef, var_coef)
+dim(coef_map_summary) # dim = (16,5)
+
+# save.image(file = paste0(raw_data_path, "modeling/AOU/aou.RData"))
+```
+
+## 2. Results cleaning 
+```{r}
+load(file = paste0(raw_data_path, "modeling/AOU/AMR_AOU_bootstrap_full.rda"))
+AOU_results = AOU_bootstrap_full %>% group_by(model) %>% 
+  summarise(mean_aucpr = mean(pr), lower_aucpr = quantile(pr, 0.025), 
+            upper_aucpr = quantile(pr, 0.975), mean_auc = mean(auc), 
+            lower_auc = quantile(auc, 0.025), upper_auc = quantile(auc, 0.975)) %>%
+  mutate(AUCPR_stats = paste0(round(mean_aucpr, 3), " (", 
+                 round(lower_aucpr, 3), ", ", round(upper_aucpr, 3), ")"),
+         AUC_stats = paste0(round(mean_auc, 3), " (", 
+                 round(lower_auc, 3), ", ", round(upper_auc, 3), ")")) %>%
+  select(model, AUCPR_stats, AUC_stats) 
+```
+
+```{r}
+# calculate p-value
+AOU_p_value = AOU_bootstrap_full %>% select(model, bootstrap, pr) %>%
+  pivot_wider(names_from = model, values_from = pr) %>%
+  mutate(prs_p = if_else(PRS.AFR.map < SNP.all.map, 1, 0),
+         e4count_p = if_else(e4count < SNP.all.map, 1, 0),
+         map_is_max = if_else(e4count < SNP.all.map & 
+                                PRS.AFR.map < SNP.all.map & 
+                                PRS.AFR.indsig < SNP.all.map, 1, 0))
+table(AOU_p_value$e4count_p)[1]/1000                          
+table(AOU_p_value$prs_p)[1]/1000
+table(AOU_p_value$map_is_max)[1]/1000
+```
+
+
+# Part 2. AFR validation
+## 1. Data preparation
+### PRS/APOE models
+```{r}
+# h2o.shutdown(prompt = F)
+# h2o.init(nthreads = -1)
+load(file = paste0(raw_data_path, "modeling/AFR/feature_PRS_full.rda"))
+max_boot = max(feature_PRS_full$bootstrap)
+# AD AFR indsig PRS
+coef_prs_AFR_indsig = feature_PRS_full %>% 
+  filter(model == "PRS_AFR_indsig") %>% group_by(variable) %>% 
+  summarise(n = n(), mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  mutate(var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_coef, var_coef)
+# AD AFR map PRS
+coef_prs_AFR_map = feature_PRS_full %>% 
+  filter(model == "PRS_AFR_map") %>% group_by(variable) %>% 
+  summarise(n = n(), mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  mutate(var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_coef, var_coef)
+# e4count
+coef_apoe = feature_PRS_full %>% 
+  filter(model == "e4count") %>% group_by(variable) %>% 
+  summarise(n = n(), mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  mutate(var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_coef, var_coef)
+```
+
+### SNP models
+```{r}
+# h2o.shutdown(prompt = F)
+# h2o.init(nthreads = -1)
+load(file = paste0(raw_data_path, "modeling/AFR/feature_map_full.rda"))
+max_boot = max(feature_map_full$bootstrap)
+coef_map_summary = feature_map_full %>% 
+  group_by(variable) %>% 
+  summarise(n = n(), mean_imp = mean(percentage, na.rm = T), 
+            lower_imp = quantile(percentage, 0.025, na.rm = T),
+            upper_imp = quantile(percentage, 0.975, na.rm = T),
+            mean_coef = mean(coef), 
+            lower_coef = quantile(coef, 0.025),
+            upper_coef = quantile(coef, 0.975)) %>%
+  arrange(desc(mean_imp)) %>% filter(n >= max_boot * 0.95) %>% 
+  mutate(var_imp = paste0(round(mean_imp, 3), " (", 
+                 round(lower_imp, 3), ", ", round(upper_imp, 3), ")"),
+         var_coef = paste0(round(mean_coef, 3), " (", 
+                 round(lower_coef, 3), ", ", round(upper_coef, 3), ")")) %>% 
+  select(variable, mean_imp, var_imp, mean_coef, var_coef)
+dim(coef_map_summary) # dim = (11,5)
+
+# save.image(file = paste0(raw_data_path, "modeling/AOU/aou.RData"))
+```
+
+## 2. Results cleaning 
+```{r}
+load(file = paste0(raw_data_path, "modeling/AOU/AFR_AOU_bootstrap_full.rda"))
+exclude_boot_id = AOU_bootstrap_full %>% group_by(bootstrap) %>% 
+  summarise(pr_median = median(pr), pr_min = min(pr), pr_max = max(pr),
+            auc_median = mean(auc), auc_min = min(auc), auc_max = max(auc)) %>%
+  filter(pr_median == pr_min | auc_median == auc_min | 
+           (pr_max - pr_min) < 0.01 | (auc_max - auc_min) < 0.01) %>% 
+  pull(bootstrap) %>% unique()
+length(exclude_boot_id) # 383
+AOU_bootstrap_full_filter = AOU_bootstrap_full %>% 
+  filter(bootstrap %!in% exclude_boot_id)
+dim(AOU_bootstrap_full_filter) # dim = (4000,4)
+AOU_results = AOU_bootstrap_full_filter %>% group_by(model) %>% 
+  summarise(mean_aucpr = mean(pr), lower_aucpr = quantile(pr, 0.025), 
+            upper_aucpr = quantile(pr, 0.975), mean_auc = mean(auc), 
+            lower_auc = quantile(auc, 0.025), upper_auc = quantile(auc, 0.975)) %>%
+  mutate(AUCPR_stats = paste0(round(mean_aucpr, 3), " (", 
+                 round(lower_aucpr, 3), ", ", round(upper_aucpr, 3), ")"),
+         AUC_stats = paste0(round(mean_auc, 3), " (", 
+                 round(lower_auc, 3), ", ", round(upper_auc, 3), ")")) %>%
+  select(model, AUCPR_stats, AUC_stats) 
+```
+
+```{r}
+# calculate p-value
+AOU_p_value = AOU_bootstrap_full %>% select(model, bootstrap, pr) %>%
+  pivot_wider(names_from = model, values_from = pr) %>%
+  mutate(prs_p = if_else(PRS.AFR.map < SNP.all.map, 1, 0),
+         e4count_p = if_else(e4count < SNP.all.map, 1, 0),
+         map_is_max = if_else(e4count < SNP.all.map & 
+                                PRS.AFR.map < SNP.all.map & 
+                                PRS.AFR.indsig < SNP.all.map, 1, 0))
+table(AOU_p_value$e4count_p)[1]/1000                          
+table(AOU_p_value$prs_p)[1]/1000
+table(AOU_p_value$map_is_max)[1]/1000
+```
+
+# Part 2. Sample comparison
+## Case vs. control
+### AMR sample 
+```{r}
+load(file = paste0(raw_data_path, "AOU/AOU_AMR_PRS.rda"))
+AOU_AMR_short = AOU_AMR_PRS %>% 
+  select(PatientID, age, female, dementia, record_length, enc_per_yr, 
+         n_encounter, n_diagnosis, paste("PC", 1:16, sep = ""), 
+         AD_PRS_AFR_indsig, AD_PRS_AFR_map, e4count) %>% drop_na() 
+dim(AOU_AMR_short) # (2467,27)
+
+extract_columns = setdiff(coef_map_summary$variable, "Intercept")
+load(file = paste0(raw_data_path, "AOU/aou_geno_freq_full_SNP.rda"))
+aou_geno_freq_short = aou_geno_freq_full_SNP %>% 
+  select(PatientID, all_of(extract_columns)) %>% drop_na() %>% 
+  mutate(Intercept = 1)
+dim(aou_geno_freq_short) # dim = (3591,17)
+
+# combine with SNP columns
+sample_AMR_AOU_full = AOU_AMR_short %>% inner_join(aou_geno_freq_short)
+dim(sample_AMR_AOU_full) # (1252,43)
+
+AMR_case = sample_AMR_AOU_full %>% filter(dementia == 1 & age >= 59) 
+AMR_control = sample_AMR_AOU_full %>% filter(dementia == 0 & age >= 70) 
+AMR_AOU_df = rbind(AMR_case, AMR_control) %>% as.data.frame()
+
+# AMR_AOU_df was created during the bootstrapping
+AMR_AOU_df %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
+```
+
+### AFR sample
+```{r}
+load(file = paste0(raw_data_path, "AOU/AOU_AFR_PRS.rda"))
+AOU_AFR_short = AOU_AFR_PRS %>% 
+  select(PatientID, age, female, dementia, record_length, enc_per_yr, 
+         n_encounter, n_diagnosis, paste("PC", 1:16, sep = ""), 
+         AD_PRS_AFR_indsig, AD_PRS_AFR_map, e4count) %>% drop_na() 
+dim(AOU_AFR_short) # (3957,27)
+
+extract_columns = setdiff(coef_map_summary$variable, "Intercept")
+load(file = paste0(raw_data_path, "AOU/aou_geno_freq_full_SNP.rda"))
+aou_geno_freq_short = aou_geno_freq_full_SNP %>% 
+  select(PatientID, all_of(extract_columns)) %>% drop_na() %>% 
+  mutate(Intercept = 1)
+dim(aou_geno_freq_short) # dim = (7836,12)
+
+# combine with SNP columns
+sample_AFR_AOU_full = AOU_AFR_short %>% inner_join(aou_geno_freq_short)
+dim(sample_AFR_AOU_full) # (3955,38)
+
+AFR_case = sample_AFR_AOU_full %>% filter(dementia == 1 & age >= 60) 
+AFR_control = sample_AFR_AOU_full %>% filter(dementia == 0 & age >= 65) 
+AFR_AOU_df = rbind(AFR_case, AFR_control) %>% as.data.frame()
+
+# AFR_AOU_df was created during the bootstrapping
+AFR_AOU_df %>% 
+  select(dementia, age, female, record_length, n_encounter, enc_per_yr, n_diagnosis) %>% 
+  tbl_summary(by = dementia) %>% add_p()
+```
+
+## AOU vs. ATLAS
+### 1) AMR
+```{r}
+load(file = paste0(raw_data_path, "modeling/AMR/sample_AMR_full.rda"))
+load(file = paste0(raw_data_path, "prs/mod/atlas_prs_final.rda"))
+atlas_sample = sample_AMR_full %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  left_join(atlas_prs_final) %>% 
+  select(age, female, record_length, n_encounter, enc_per_yr, n_diagnosis, 
+         dementia, e4count) %>% mutate(e4count = as.factor(e4count)) %>%
+  mutate(sample = "ATLAS")
+dim(atlas_sample) # (610,9)
+
+aou_sample = AMR_AOU_df %>% 
+  select(age, female, record_length, n_encounter, enc_per_yr, n_diagnosis, 
+         dementia, e4count) %>% mutate(e4count = as.factor(e4count)) %>%
+  mutate(sample = "AOU")
+dim(aou_sample) # (526,9)
+```
+
+```{r}
+rbind(atlas_sample, aou_sample) %>% as.data.frame() %>% 
+  tbl_summary(by = sample) %>% add_p()
+```
+
+### 2) AFR
+```{r}
+load(file = paste0(raw_data_path, "modeling/AFR/sample_AFR_full.rda"))
+load(file = paste0(raw_data_path, "prs/mod/atlas_prs_final.rda"))
+atlas_sample = sample_AFR_full %>% 
+  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
+  left_join(atlas_prs_final) %>% 
+  select(age, female, record_length, n_encounter, enc_per_yr, n_diagnosis, 
+         dementia, e4count) %>% mutate(e4count = as.factor(e4count)) %>%
+  mutate(sample = "ATLAS")
+dim(atlas_sample) # (440,9)
+
+aou_sample = AFR_AOU_df %>% 
+  select(age, female, record_length, n_encounter, enc_per_yr, n_diagnosis, 
+         dementia, e4count) %>% mutate(e4count = as.factor(e4count)) %>%
+  mutate(sample = "AOU")
+dim(aou_sample) # (2644,9)
+```
+
+```{r}
+rbind(atlas_sample, aou_sample) %>% as.data.frame() %>% 
+  tbl_summary(by = sample) %>% add_p()
+```

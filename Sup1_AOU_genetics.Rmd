@@ -20,292 +20,480 @@ output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
 source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/functions.R")
 ```
 
-## 1. AD SNPs extraction from UCLA ATLAS
+# Part 1. Data preparation
+## 1. Extract info from AOU database
 ```{r}
-# AD trans-map PRS SNPs extraction
-load(file = paste0(raw_data_path, "prs/mod/AD_trans_beta_map.rda"))
-AD_trans_map_snp = AD_trans_beta_map %>% 
-  select(rsid, beta_trans_map) %>% 
-  separate(rsid, into = c("chr", "pos", "a0", "a1"), 
-           sep = ":", remove = FALSE) %>% 
-  mutate(pos_plus = as.character(as.numeric(pos) + 1)) %>% 
-  mutate(output_var = paste0(chr, ":", pos, "-", pos_plus)) %>% 
-  ungroup() %>% unique()
-dim(AD_trans_map_snp) # (123,8)
-# write.table(AD_trans_map_snp,
-#             file = paste0(output_path, "AOU_validation/AMR/AD_trans_map_snp.txt"),
-#             sep = "\t", quote = F, row.names = F, col.names = T)
-AD_trans_map_snp_short = AD_trans_map_snp %>% 
-  select(rsid, chr, pos, a0, a1, beta_trans_map) %>% 
-  dplyr::rename("beta" = "beta_trans_map") %>% 
-  mutate(pos = as.numeric(pos))
+load(paste0(output_path, "AOU_validation/final_eligible_AMR.rda"))
+final_eligible_AMR = final_eligible_AOU
+dim(final_eligible_AMR) # dim = (3066,8)
+sample_id_AMR = final_eligible_AMR %>% 
+  select(PatientID) %>% dplyr::rename("sample_id" = "PatientID")
+load(paste0(output_path, "AOU_validation/final_eligible_AFR.rda"))
+final_eligible_AFR = final_eligible_AOU
+dim(final_eligible_AFR) # dim = (4778,8)
+sample_id_AFR = final_eligible_AFR %>% 
+  select(PatientID) %>% dplyr::rename("sample_id" = "PatientID")
+
+output_sample_id = rbind(sample_id_AMR, sample_id_AFR)
+dim(output_sample_id) # dim = (7844,1)
+# output to txt
+write.table(output_sample_id,
+            file = paste0(output_path, "AOU_validation/sample_id.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
 ```
 
 ```{r}
-# AD AFR-indsig PRS SNPs extraction
-load(file = paste0(raw_data_path, "prs/mod/AD_AFR_beta_indsig.rda"))
-AD_AFR_indsig_snp = AD_AFR_beta_indsig %>% 
-  select(rsid, beta_AFR_indsig) %>% 
-  separate(rsid, into = c("chr", "pos", "a0", "a1"), 
-           sep = ":", remove = FALSE) %>% 
-  mutate(pos_plus = as.character(as.numeric(pos) + 1)) %>% 
-  mutate(output_var = paste0(chr, ":", pos, "-", pos_plus)) %>% 
-  ungroup() %>% unique()
-dim(AD_AFR_indsig_snp) # (22,8)
-# write.table(AD_AFR_indsig_snp,
-#             file = paste0(output_path, "AOU_validation/AFR/AD_AFR_indsig_snp.txt"),
-#             sep = "\t", quote = F, row.names = F, col.names = T)
-AD_AFR_indsig_snp_short = AD_AFR_indsig_snp %>% 
-  select(rsid, chr, pos, a0, a1, beta_AFR_indsig) %>% 
-  dplyr::rename("beta" = "beta_AFR_indsig") %>% 
-  mutate(pos = as.numeric(pos))
+options(scipen = 999)
+load(file = paste0(raw_data_path, "FUMA_outputs/overlap_fuma.rda"))
+dim(overlap_fuma) # dim = (8727, 20)
+output_snps = overlap_fuma %>% mutate(stop = as.numeric(start)+1) %>% 
+  select(chr, start, stop, ref, alt) %>% 
+  # add APOE SNPs
+  add_row(chr = "chr19", start = 44908684, stop = 44908685, 
+          ref = "T", alt = "C") %>%
+  add_row(chr = "chr19", start = 44908822, stop = 44908823, 
+          ref = "C", alt = "T") %>% unique()
+dim(output_snps) # dim = (7393, 5)
+# output to txt
+write.table(output_snps, 
+            file = paste0(output_path, 'AOU_validation/output_snps.txt'),
+            sep = "\t", quote = F, row.names = F, col.names = T)
 ```
 
-
-## 2. Define AD PRS in AOU
-### AD trans map
+## 2. Data cleaning from AOU outputs
+### Sample ancestry PCs
 ```{r}
-# Biallelic
-geno_file = paste0(raw_data_path, 'AOU/AD_trans_map_biallelic_plink')
-# snp_readBed(paste0(geno_file, '.bed'))
-obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
-# extract the SNP information from the genotype
-map = obj.bigSNP$map[-3]
-names(map) = c("chr", "rsid", "pos", "a1", "a0")
-cleaned_snp = snp_match(AD_trans_map_snp_short, map)
-# 94 variants have been matched; 0 were flipped and 23 were reversed
-column_to_change = cleaned_snp %>% filter(rsid.ss != rsid) %>% pull(rsid) # N = 23
-genotype = obj.bigSNP$genotypes
-genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
-colnames(genotype_df) = map$rsid
-genotype_df_edit = genotype_df %>% 
-  mutate(across(.cols = all_of(column_to_change), .fns = ~ abs(. - 2), 
-                .names = "{.col}"))
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split1 = cbind(fam.order[,2], genotype_df_edit) %>% as.data.frame() 
-colnames(genotype_df_fam_split1)[1] = "IID"
-dim(genotype_df_fam_split1) # 245394,95
-# Restrict to selected patients
-load(file = paste0(raw_data_path, "AOU/AMR/final_eligible_AOU_amr.rda"))
-genotype_df_combined_full_split1 = genotype_df_fam_split1 %>% 
-  filter(IID %in% final_eligible_AOU_amr$PatientID) %>% 
-  select(IID, all_of(cleaned_snp$rsid)) 
-dim(genotype_df_combined_full_split1) # (9248,95)
-missing_info = genotype_df_combined_full_split1 %>% 
-  summarise_all(function(x) sum(is.na(x))) %>%  
-  gather(variable, missing_count) # max_missing = 4584
-genotype_df_combined_split1 = genotype_df_combined_full_split1 %>% drop_na()
-dim(genotype_df_combined_split1) # # (2826,95)
+# read in txt file
+sample_ancestry = read.table(file = paste0(raw_data_path, "AOU/ancestry_pcs.txt"),
+                             sep = "\t", header = T, stringsAsFactors = F)
+# combine with phenotype info
+AOU_AMR = final_eligible_AMR %>% 
+  left_join(sample_ancestry, by = c("PatientID" = "research_id")) %>% 
+  select(-ancestry_pred)
+dim(AOU_AMR) # dim = (3066,24)
+AOU_AFR = final_eligible_AFR %>% 
+  left_join(sample_ancestry, by = c("PatientID" = "research_id")) %>% 
+  select(-ancestry_pred)
+dim(AOU_AFR) # dim = (4778,24)
+```
 
-# Multiallelic
-geno_file = paste0(raw_data_path, 'AOU/AD_trans_map_multiallelic_plink')
+### Geno data preparation
+```{r}
+geno_file = paste0(raw_data_path, 'AOU/model_snps_plink')
 snp_readBed(paste0(geno_file, '.bed'))
 obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
 # extract the SNP information from the genotype
 map = obj.bigSNP$map[-3]
 names(map) = c("chr", "rsid", "pos", "a1", "a0")
-cleaned_snp = snp_match(AD_trans_map_snp_short, map)
-# 29 variants have been matched; 0 were flipped and 3 were reversed
-column_to_change = cleaned_snp %>% filter(rsid.ss != rsid) %>% pull(rsid) # N = 3
+map = map %>% mutate(chr = as.numeric(substr(chr, 4, nchar(chr))))
+# Get fam order
+fam.order = as.data.table(obj.bigSNP$fam)
+# get genotype info
 genotype = obj.bigSNP$genotypes
+# genotype.imp = snp_fastImputeSimple(obj.bigSNP$genotypes, method = 'random') 
 genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
 colnames(genotype_df) = map$rsid
-genotype_df_edit = genotype_df %>% 
-  mutate(across(.cols = all_of(column_to_change), .fns = ~ abs(. - 2), 
-                .names = "{.col}"))
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split2 = cbind(fam.order[,2], genotype_df_edit) %>% as.data.frame() 
-colnames(genotype_df_fam_split2)[1] = "IID"
-dim(genotype_df_fam_split2) # 245394,68
-# Restrict to selected patients
-load(file = paste0(raw_data_path, "AOU/AMR/final_eligible_AOU_amr.rda"))
-genotype_df_combined_full_split2 = genotype_df_fam_split2 %>% 
-  filter(IID %in% final_eligible_AOU_amr$PatientID) %>% 
-  select(IID, all_of(cleaned_snp$rsid)) 
-dim(genotype_df_combined_full_split2) # (9248,30)
-missing_info = genotype_df_combined_full_split2 %>% 
+dim(genotype_df) # dim = (7844,7393)
+# check for missing
+missing_info = genotype_df %>% 
   summarise_all(function(x) sum(is.na(x))) %>%  
-  gather(variable, missing_count) # max_missing = 1911
-genotype_df_combined_split2 = genotype_df_combined_full_split2 %>% drop_na()
-dim(genotype_df_combined_split2) # # (6454,30)
-# Combine together
-genotype_df_combined = genotype_df_combined_split1 %>% 
-  inner_join(genotype_df_combined_split2) %>% 
-  dplyr::rename("chr1:207573951:G:A" = "chr1:207573951:A:G", 
-                "chr1:207611623:G:A" = "chr1:207611623:A:G",
-                "chr1:207629207:C:A" = "chr1:207629207:A:C",
-                "chr1:207633385:A:G" = "chr1:207633385:G:A",
-                "chr2:127105077:G:T" = "chr2:127105077:T:G",
-                "chr11:60237795:G:A" = "chr11:60237795:A:G",
-                "chr11:60251677:T:C" = "chr11:60251677:C:T",
-                "chr11:60312178:T:C" = "chr11:60312178:C:T",
-                "chr11:86089237:A:G" = "chr11:86089237:G:A",
-                "chr19:44662645:C:A" = "chr19:44662645:A:C",
-                "chr19:44704558:C:T" = "chr19:44704558:T:C",
-                "chr19:44708135:C:T" = "chr19:44708135:T:C",
-                "chr19:44824202:C:T" = "chr19:44824202:T:C",
-                "chr19:44836881:A:G" = "chr19:44836881:G:A",
-                "chr19:44852884:T:C" = "chr19:44852884:C:T",
-                "chr19:44857505:G:A" = "chr19:44857505:A:G",
-                "chr19:44864753:G:A" = "chr19:44864753:A:G",
-                "chr19:44877713:T:G" = "chr19:44877713:G:T",
-                "chr19:44878777:G:A" = "chr19:44878777:A:G",
-                "chr19:44880859:A:G" = "chr19:44880859:G:A",
-                "chr19:44892009:A:G" = "chr19:44892009:G:A",
-                "chr19:44905579:G:T" = "chr19:44905579:T:G",
-                "chr19:44911194:C:T" = "chr19:44911194:T:C",
-                "chr19:44928401:G:A" = "chr19:44928401:A:G",
-                "chr19:44951509:A:G" = "chr19:44951509:G:A",
-                "chr19:45012792:C:T" = "chr19:45012792:T:C") %>% 
-  select("IID", all_of(AD_trans_map_snp_short$rsid))
-# Create PRS
-genotype.targ.matrix = genotype_df_combined[2:124] %>% as.matrix() 
-dim(genotype.targ.matrix) # (1976,123)
-beta = AD_trans_map_snp_short$beta
-# Calculate PRS
-pred_prs = genotype.targ.matrix %*% beta
-pred_prs_final = cbind(genotype_df_combined[, "IID"], pred_prs) %>% as.data.frame()
-names(pred_prs_final) = c('PatientID', 'AD_PRS_trans_map')
-# Normalization
-load(file = paste0(raw_data_path, "prs/mod/AD_trans_map_EUR_1kg_mean.rda"))
-load(file = paste0(raw_data_path, "prs/mod/AD_trans_map_EUR_1kg_sd.rda"))
-pred_prs_final$AD_PRS_trans_map_norm = 
-  (pred_prs_final$AD_PRS_trans_map - AD_trans_map_EUR_1kg_mean) / AD_trans_map_EUR_1kg_sd
-pred_prs_final_trans = pred_prs_final
-save(pred_prs_final_trans, file = paste0(raw_data_path, "AOU/pred_prs_final_trans.rda"))
+  gather(variable, missing_count) 
+# combine together
+genotype_df_fam = cbind(fam.order[,2], genotype_df) %>% as.data.frame() 
+dim(genotype_df_fam) # dim = (7844,7394)
 ```
 
-### AD AFR indsig
+# Part 2. Genetic predictors
+## 1. PRSs
 ```{r}
-geno_file = paste0(raw_data_path, 'AOU/AD_AFR_indsig_biallelic_plink')
-# snp_readBed(paste0(geno_file, '.bed'))
-obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
-# extract the SNP information from the genotype
-map = obj.bigSNP$map[-3]
-names(map) = c("chr", "rsid", "pos", "a1", "a0")
-cleaned_snp = snp_match(AD_AFR_indsig_snp_short, map)
-# 14 variants have been matched; 0 were flipped and 1 were reversed
-column_to_change = cleaned_snp %>% filter(rsid.ss != rsid) %>% pull(rsid) # N = 1
-genotype = obj.bigSNP$genotypes
-genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
-colnames(genotype_df) = map$rsid
-genotype_df_edit = genotype_df %>% 
-  mutate(across(.cols = all_of(column_to_change), .fns = ~ abs(. - 2), 
-                .names = "{.col}"))
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split1 = cbind(fam.order[,2], genotype_df_edit) %>% as.data.frame() 
-colnames(genotype_df_fam_split1)[1] = "IID"
-dim(genotype_df_fam_split1) # 245394,15
-# Restrict to selected patients
-load(file = paste0(raw_data_path, "AOU/AFR/final_eligible_AOU_afr.rda"))
-genotype_df_combined_full_split1 = genotype_df_fam_split1 %>% 
-  filter(IID %in% final_eligible_AOU_afr$PatientID) %>% 
-  select(IID, all_of(cleaned_snp$rsid)) 
-dim(genotype_df_combined_full_split1) # (14201,15)
-missing_info = genotype_df_combined_full_split1 %>% 
-  summarise_all(function(x) sum(is.na(x))) %>%  
-  gather(variable, missing_count) # max_missing = 2276
-genotype_df_combined_split1 = genotype_df_combined_full_split1 %>% drop_na()
-
-geno_file = paste0(raw_data_path, 'AOU/AD_AFR_indsig_multiallelic_plink')
-snp_readBed(paste0(geno_file, '.bed'))
-obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
-# extract the SNP information from the genotype
-map = obj.bigSNP$map[-3]
-names(map) = c("chr", "rsid", "pos", "a1", "a0")
-cleaned_snp = snp_match(AD_AFR_indsig_snp_short, map)
-# 8 variants have been matched; 0 were flipped and 0 were reversed
-column_to_change = cleaned_snp %>% filter(rsid.ss != rsid) %>% pull(rsid) # N = 0
-genotype = obj.bigSNP$genotypes
-genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
-colnames(genotype_df) = map$rsid
-genotype_df_edit = genotype_df 
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split2 = cbind(fam.order[,2], genotype_df_edit) %>% as.data.frame() 
-colnames(genotype_df_fam_split2)[1] = "IID"
-dim(genotype_df_fam_split2) # 245394,21
-# Restrict to selected patients
-load(file = paste0(raw_data_path, "AOU/AFR/final_eligible_AOU_afr.rda"))
-genotype_df_combined_full_split2 = genotype_df_fam_split2 %>% 
-  filter(IID %in% final_eligible_AOU_afr$PatientID) %>% 
-  select(IID, all_of(cleaned_snp$rsid)) 
-dim(genotype_df_combined_full_split2) # (14201,9)
-missing_info = genotype_df_combined_full_split2 %>% 
-  summarise_all(function(x) sum(is.na(x))) %>%  
-  gather(variable, missing_count) # max_missing = 35
-genotype_df_combined_split2 = genotype_df_combined_full_split2 %>% drop_na()
-
-# Combine together
-genotype_df_combined = genotype_df_combined_split1 %>% 
-  inner_join(genotype_df_combined_split2) %>% 
-  dplyr::rename("chr19:44905579:G:T" = "chr19:44905579:T:G") %>% 
-  select("IID", all_of(AD_AFR_indsig_snp_short$rsid))
-# Create PRS
-genotype.targ.matrix = genotype_df_combined[2:23] %>% as.matrix() 
-dim(genotype.targ.matrix) # (11871,22)
-beta = AD_AFR_indsig_snp_short$beta
-
-# Calculate PRS
-pred_prs = genotype.targ.matrix %*% beta
-pred_prs_final = cbind(genotype_df_combined[, "IID"], pred_prs) %>% as.data.frame()
-names(pred_prs_final) = c('PatientID', 'AD_PRS_AFR_indsig')
-# Normalization
-load(file = paste0(raw_data_path, "prs/mod/AD_AFR_indsig_EUR_1kg_mean.rda"))
-load(file = paste0(raw_data_path, "prs/mod/AD_AFR_indsig_EUR_1kg_sd.rda"))
-pred_prs_final$AD_PRS_AFR_indsig_norm = 
-  (pred_prs_final$AD_PRS_AFR_indsig - AD_AFR_indsig_EUR_1kg_mean) / AD_AFR_indsig_EUR_1kg_sd
-pred_prs_final_afr = pred_prs_final
-save(pred_prs_final_afr, file = paste0(raw_data_path, "AOU/pred_prs_final_afr.rda"))
+load(file = paste0(raw_data_path, "modeling/beta_merge_raw.rda"))
 ```
 
-## 3. APOE status
+### A. AD EUR
+#### Independent sig SNPs
+```{r}
+snp_AD_EUR = beta_merge_raw %>% filter(!is.na(beta_EUR_indsig)) %>% 
+  select(chr, pos, a0, a1, beta_EUR_indsig) %>% 
+  dplyr::rename("beta" = "beta_EUR_indsig")
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_EUR = snp_match(snp_AD_EUR, map) # 76 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_AD_EUR$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_AD_EUR$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('AD_PRS_EUR_indsig', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+AD_EUR_1kg_mean = -0.9308247
+AD_EUR_1kg_sd = 1.505618
+# Apply to ATLAS
+AD_EUR_prs_indsig = pred_prs_final %>% drop_na()
+dim(AD_EUR_prs_indsig) # dim = (3515,2)
+AD_EUR_prs_indsig$AD_PRS_EUR_indsig = 
+  (AD_EUR_prs_indsig$AD_PRS_EUR_indsig - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+```
+
+#### Mapped SNPs
+```{r}
+snp_AD_EUR = beta_merge_raw %>% filter(!is.na(beta_EUR_map)) %>% 
+  select(chr, pos, a0, a1, beta_EUR_map) %>% 
+  dplyr::rename("beta" = "beta_EUR_map")
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_EUR = snp_match(snp_AD_EUR, map) # 75 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_AD_EUR$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_AD_EUR$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('AD_PRS_EUR_map', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+AD_EUR_1kg_mean = -0.0667567
+AD_EUR_1kg_sd = 1.134523
+# Apply to ATLAS
+AD_EUR_prs_map = pred_prs_final %>% drop_na()
+dim(AD_EUR_prs_map) # dim = (2075,2)
+AD_EUR_prs_map$AD_PRS_EUR_map = 
+  (AD_EUR_prs_map$AD_PRS_EUR_map - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+```
+
+### B. AD AFR
+#### Independent sig SNPs
+```{r}
+snp_AD_AFR = beta_merge_raw %>% filter(!is.na(beta_AFR_indsig)) %>% 
+  select(chr, pos, a0, a1, beta_AFR_indsig) %>% 
+  dplyr::rename("beta" = "beta_AFR_indsig")
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_AFR = snp_match(snp_AD_AFR, map) # 11 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_AD_AFR$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_AD_AFR$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('AD_PRS_AFR_indsig', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+AD_EUR_1kg_mean = 0.3909557
+AD_EUR_1kg_sd = 1.171444
+# Apply to ATLAS
+AD_AFR_prs_indsig = pred_prs_final %>% drop_na()
+dim(AD_AFR_prs_indsig) # dim = (6521,2)
+AD_AFR_prs_indsig$AD_PRS_AFR_indsig = 
+  (AD_AFR_prs_indsig$AD_PRS_AFR_indsig - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+```
+
+#### Mapped SNPs
+```{r}
+snp_AD_AFR = beta_merge_raw %>% filter(!is.na(beta_AFR_map)) %>% 
+  select(chr, pos, a0, a1, beta_AFR_map) %>% 
+  dplyr::rename("beta" = "beta_AFR_map")
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_AFR = snp_match(snp_AD_AFR, map) # 11 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_AD_AFR$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_AD_AFR$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('AD_PRS_AFR_map', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+AD_EUR_1kg_mean = 0.1592197
+AD_EUR_1kg_sd = 0.752526
+# Apply to ATLAS
+AD_AFR_prs_map = pred_prs_final %>% drop_na()
+dim(AD_AFR_prs_map) # dim = (7718,2)
+AD_AFR_prs_map$AD_PRS_AFR_map = 
+  (AD_AFR_prs_map$AD_PRS_AFR_map - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+```
+
+### C. AD trans
+#### Independent sig SNPs
+```{r}
+snp_AD_trans = beta_merge_raw %>% filter(!is.na(beta_trans_indsig)) %>% 
+  select(chr, pos, a0, a1, beta_trans_indsig) %>% 
+  dplyr::rename("beta" = "beta_trans_indsig")
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_trans = snp_match(snp_AD_trans, map) # 54 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_AD_trans$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_AD_trans$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('AD_PRS_trans_indsig', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+AD_EUR_1kg_mean = -0.04261034
+AD_EUR_1kg_sd = 2.248376
+# Apply to ATLAS
+AD_trans_prs_indsig = pred_prs_final %>% drop_na()
+dim(AD_trans_prs_indsig) # dim = (5314,2)
+AD_trans_prs_indsig$AD_PRS_trans_indsig = 
+  (AD_trans_prs_indsig$AD_PRS_trans_indsig - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+```
+
+#### Mapped SNPs
+```{r}
+snp_AD_trans = beta_merge_raw %>% filter(!is.na(beta_trans_map)) %>% 
+  select(chr, pos, a0, a1, beta_trans_map) %>% 
+  dplyr::rename("beta" = "beta_trans_map")
+# Reverse beta if necessary by performing SNP matching
+info_snp_AD_trans = snp_match(snp_AD_trans, map) # 54 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_AD_trans$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_AD_trans$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('AD_PRS_trans_map', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+AD_EUR_1kg_mean = 0.2465559
+AD_EUR_1kg_sd = 1.968068
+# Apply to ATLAS
+AD_trans_prs_map = pred_prs_final %>% drop_na()
+dim(AD_trans_prs_map) # dim = (2149,2)
+AD_trans_prs_map$AD_PRS_trans_map = 
+  (AD_trans_prs_map$AD_PRS_trans_map - AD_EUR_1kg_mean) / AD_EUR_1kg_sd
+```
+
+### D. LBD
+#### Independent sig SNPs
+```{r}
+snp_LBD = beta_merge_raw %>% filter(!is.na(beta_LBD_indsig)) %>% 
+  select(chr, pos, a0, a1, beta_LBD_indsig) %>% 
+  dplyr::rename("beta" = "beta_LBD_indsig")
+# Reverse beta if necessary by performing SNP matching
+info_snp_LBD = snp_match(snp_LBD, map) # 9 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_LBD$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_LBD$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('LBD_PRS_indsig', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+LBD_1kg_mean = 0.2926416
+LBD_1kg_sd = 0.7824751
+# Apply to ATLAS
+LBD_prs_indsig = pred_prs_final %>% drop_na()
+dim(LBD_prs_indsig) # dim = (7822,2)
+LBD_prs_indsig$LBD_PRS_indsig = 
+  (LBD_prs_indsig$LBD_PRS_indsig - LBD_1kg_mean) / LBD_1kg_sd
+```
+
+#### Mapped SNPs
+```{r}
+snp_LBD = beta_merge_raw %>% filter(!is.na(beta_LBD_map)) %>% 
+  select(chr, pos, a0, a1, beta_LBD_map) %>% 
+  dplyr::rename("beta" = "beta_LBD_map")
+# Reverse beta if necessary by performing SNP matching
+info_snp_LBD = snp_match(snp_LBD, map) # 9 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_LBD$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_LBD$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('LBD_PRS_map', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+LBD_1kg_mean = -0.05188502
+LBD_1kg_sd = 0.6901303
+# Apply to ATLAS
+LBD_prs_map = pred_prs_final %>% drop_na()
+dim(LBD_prs_map) # dim = (7843,2)
+LBD_prs_map$LBD_PRS_map = 
+  (LBD_prs_map$LBD_PRS_map - LBD_1kg_mean) / LBD_1kg_sd
+```
+
+### E. PD
+#### Independent sig SNPs
+```{r}
+snp_PD = beta_merge_raw %>% filter(!is.na(beta_PD_indsig)) %>% 
+  select(chr, pos, a0, a1, beta_PD_indsig) %>% 
+  dplyr::rename("beta" = "beta_PD_indsig")
+# Reverse beta if necessary by performing SNP matching
+info_snp_PD = snp_match(snp_PD, map) # 27 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_PD$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_PD$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('PD_PRS_indsig', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+PD_1kg_mean = -0.4156226
+PD_1kg_sd = 0.5244261
+# Apply to ATLAS
+PD_prs_indsig = pred_prs_final %>% drop_na()
+dim(PD_prs_indsig) # dim = (7825,2)
+PD_prs_indsig$PD_PRS_indsig = 
+  (PD_prs_indsig$PD_PRS_indsig - PD_1kg_mean) / PD_1kg_sd
+```
+
+#### Mapped SNPs
+```{r}
+snp_PD = beta_merge_raw %>% filter(!is.na(beta_PD_map)) %>% 
+  select(chr, pos, a0, a1, beta_PD_map) %>% 
+  dplyr::rename("beta" = "beta_PD_map")
+# Reverse beta if necessary by performing SNP matching
+info_snp_PD = snp_match(snp_PD, map) # 27 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_PD$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_PD$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('PD_PRS_map', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+PD_1kg_mean = -0.2469264
+PD_1kg_sd = 0.3098816
+# Apply to ATLAS
+PD_prs_map = pred_prs_final %>% drop_na()
+dim(PD_prs_map) # dim = (5919,2)
+PD_prs_map$PD_PRS_map = 
+  (PD_prs_map$PD_PRS_map - PD_1kg_mean) / PD_1kg_sd
+```
+
+### F. PSP
+#### Independent sig SNPs
+```{r}
+snp_PSP = beta_merge_raw %>% filter(!is.na(beta_PSP_indsig)) %>% 
+  select(chr, pos, a0, a1, beta_PSP_indsig) %>% 
+  dplyr::rename("beta" = "beta_PSP_indsig")
+# Reverse beta if necessary by performing SNP matching
+info_snp_PSP = snp_match(snp_PSP, map) # 21 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_PSP$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_PSP$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('PSP_PRS_indsig', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+PSP_1kg_mean = 0.2032141
+PSP_1kg_sd = 0.1415184
+# Apply to ATLAS
+PSP_prs_indsig = pred_prs_final %>% drop_na()
+dim(PSP_prs_indsig) # dim = (6842,2)
+PSP_prs_indsig$PSP_PRS_indsig = 
+  (PSP_prs_indsig$PSP_PRS_indsig - PSP_1kg_mean) / PSP_1kg_sd
+```
+
+#### Mapped SNPs
+```{r}
+snp_PSP = beta_merge_raw %>% filter(!is.na(beta_PSP_map)) %>% 
+  select(chr, pos, a0, a1, beta_PSP_map) %>% 
+  dplyr::rename("beta" = "beta_PSP_map")
+# Reverse beta if necessary by performing SNP matching
+info_snp_PSP = snp_match(snp_PSP, map) # 21 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_PSP$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_PSP$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('PSP_PRS_map', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+PSP_1kg_mean = 0.07864808
+PSP_1kg_sd = 0.1252794
+# Apply to ATLAS
+PSP_prs_map = pred_prs_final %>% drop_na()
+dim(PSP_prs_map) # dim = (6868,2)
+PSP_prs_map$PSP_PRS_map = 
+  (PSP_prs_map$PSP_PRS_map - PSP_1kg_mean) / PSP_1kg_sd
+```
+
+### G. Stroke
+#### Independent sig SNPs
+```{r}
+snp_STROKE = beta_merge_raw %>% filter(!is.na(beta_STROKE_indsig)) %>% 
+  select(chr, pos, a0, a1, beta_STROKE_indsig) %>% 
+  dplyr::rename("beta" = "beta_STROKE_indsig")
+# Reverse beta if necessary by performing SNP matching
+info_snp_STROKE = snp_match(snp_STROKE, map) # 21 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_STROKE$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_STROKE$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('STROKE_PRS_indsig', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+STROKE_1kg_mean = 0.169449
+STROKE_1kg_sd = 0.1939814
+# Apply to ATLAS
+STROKE_prs_indsig = pred_prs_final %>% drop_na()
+dim(STROKE_prs_indsig) # dim = (7798,2)
+STROKE_prs_indsig$STROKE_PRS_indsig = 
+  (STROKE_prs_indsig$STROKE_PRS_indsig - STROKE_1kg_mean) / STROKE_1kg_sd
+```
+
+#### Mapped SNPs
+```{r}
+snp_STROKE = beta_merge_raw %>% filter(!is.na(beta_STROKE_map)) %>% 
+  select(chr, pos, a0, a1, beta_STROKE_map) %>% 
+  dplyr::rename("beta" = "beta_STROKE_map")
+# Reverse beta if necessary by performing SNP matching
+info_snp_STROKE = snp_match(snp_STROKE, map) # 20 variants have been matched
+# Filter genotype info
+genotype.targ.indsig = genotype_df_fam %>% dplyr::select(all_of(info_snp_STROKE$rsid))
+genotype.targ.matrix = as.matrix(genotype.targ.indsig[])
+# Calculate PRS
+pred_prs = genotype.targ.matrix %*% info_snp_STROKE$beta
+pred_prs_final = cbind(pred_prs, genotype_df_fam[, 'sample.ID']) %>% as.data.frame()
+names(pred_prs_final) = c('STROKE_PRS_map', 'PatientID')
+# Normalization (use 1KG EUR as reference)
+STROKE_1kg_mean = 0.009353257
+STROKE_1kg_sd = 0.1423629
+# Apply to ATLAS
+STROKE_prs_map = pred_prs_final %>% drop_na()
+dim(STROKE_prs_map) # dim = (7807,2)
+STROKE_prs_map$STROKE_PRS_map = 
+  (STROKE_prs_map$STROKE_PRS_map - STROKE_1kg_mean) / STROKE_1kg_sd
+```
+
+### Combine all
+```{r}
+AOU_AMR_PRS = AOU_AMR %>% 
+  left_join(AD_EUR_prs_indsig, by = c("PatientID" = "PatientID")) %>% 
+  left_join(AD_EUR_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(AD_AFR_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(AD_AFR_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(AD_trans_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(AD_trans_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(LBD_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(LBD_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(PD_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(PD_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(PSP_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(PSP_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(STROKE_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(STROKE_prs_map, by = c("PatientID" = "PatientID"))
+dim(AOU_AMR_PRS) # dim = (3066, 38)
+AOU_AFR_PRS = AOU_AFR %>% 
+  left_join(AD_EUR_prs_indsig, by = c("PatientID" = "PatientID")) %>% 
+  left_join(AD_EUR_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(AD_AFR_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(AD_AFR_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(AD_trans_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(AD_trans_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(LBD_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(LBD_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(PD_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(PD_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(PSP_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(PSP_prs_map, by = c("PatientID" = "PatientID")) %>% 
+  left_join(STROKE_prs_indsig, by = c("PatientID" = "PatientID")) %>%
+  left_join(STROKE_prs_map, by = c("PatientID" = "PatientID"))
+dim(AOU_AFR_PRS) # dim = (4778, 38)
+```
+
+## 2. APOE status
 ```{r}
 # chr19:44908684
-geno_file = paste0(raw_data_path, 'AOU/apoe_biallelic_plink')
-snp_readBed(paste0(geno_file, '.bed'))
-obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
-map = obj.bigSNP$map[-3]
-names(map) = c("chr", "rsid", "pos", "a1", "a0")
-genotype = obj.bigSNP$genotypes
-genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
-colnames(genotype_df) = map$rsid
-missing_info = genotype_df %>% 
-  summarise_all(function(x) sum(is.na(x))) %>%  
-  gather(variable, missing_count) # Only a few missing, we just excluded those people
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split1 = cbind(fam.order[,2], genotype_df) %>% 
-  as.data.frame() %>% drop_na()
-colnames(genotype_df_fam_split1)[1] = "IID"
-dim(genotype_df_fam_split1) # 245369,3
-#  chr19:44908822
-geno_file = paste0(raw_data_path, 'AOU/apoe_multiallelic_plink')
-snp_readBed(paste0(geno_file, '.bed'))
-obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
-map = obj.bigSNP$map[-3]
-names(map) = c("chr", "rsid", "pos", "a1", "a0")
-genotype = obj.bigSNP$genotypes
-genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
-colnames(genotype_df) = map$rsid
-missing_info = genotype_df %>% 
-  summarise_all(function(x) sum(is.na(x))) %>%  
-  gather(variable, missing_count) # Only a few missing, we just excluded those people
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split2 = cbind(fam.order[,2], genotype_df) %>% 
-  as.data.frame() %>% drop_na()
-colnames(genotype_df_fam_split2)[1] = "IID"
-dim(genotype_df_fam_split2) # 245391,3
-# Combine together
-genotype_df_fam = genotype_df_fam_split1 %>% inner_join(genotype_df_fam_split2) %>% 
-  select(-`chr19:44908822:C:A`)
-dim(genotype_df_fam) # 245366,3
 # define APOE-e4 status
 apoe_status = genotype_df_fam %>% 
+  select(sample.ID, `chr19:44908684:T:C`, `chr19:44908822:C:T`) %>%
   mutate(e4count = case_when(
     `chr19:44908684:T:C` == 0 & `chr19:44908822:C:T` == 0 ~ 0,
     `chr19:44908684:T:C` == 0 & `chr19:44908822:C:T` == 1 ~ 1,
@@ -316,148 +504,35 @@ apoe_status = genotype_df_fam %>%
     `chr19:44908684:T:C` == 2 & `chr19:44908822:C:T` == 0 ~ 0,
     `chr19:44908684:T:C` == 2 & `chr19:44908822:C:T` == 1 ~ 0,
     `chr19:44908684:T:C` == 2 & `chr19:44908822:C:T` == 2 ~ 0
-  )) %>% select(IID, e4count) %>% dplyr::rename("PatientID" = "IID")
-save(apoe_status, file = paste0(raw_data_path, "AOU/apoe_status.rda"))
-```
+  )) %>% select(sample.ID, e4count) %>% dplyr::rename("PatientID" = "sample.ID")
 
-## 4. LASSO SNPs 
-```{r}
-load(file = paste0(raw_data_path, "AOU/lasso_map_snp.rda"))
-lasso_map_snp = lasso_map_snp %>% mutate(pos = as.numeric(pos))
-geno_file = paste0(raw_data_path, 'AOU/lasso_map_biallelic_plink')
-# snp_readBed(paste0(geno_file, '.bed'))
-obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
-map = obj.bigSNP$map[-3]
-names(map) = c("chr", "rsid", "pos", "a1", "a0")
-# Check matching
-cleaned_snp = snp_match(lasso_map_snp, map)
-# 70 variants have been matched; 0 were flipped and 14 were reversed.
-column_to_change = cleaned_snp %>% filter(rsid.ss != rsid) %>% pull(rsid)
-length(column_to_change) # N = 14
-genotype = obj.bigSNP$genotypes
-genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
-colnames(genotype_df) = map$rsid
-genotype_df_edit = genotype_df %>% 
-  mutate(across(.cols = all_of(column_to_change), .fns = ~ abs(. - 2), 
-                .names = "{.col}"))
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split1 = cbind(fam.order[,2], genotype_df_edit) %>% as.data.frame() 
-colnames(genotype_df_fam_split1)[1] = "IID"
-dim(genotype_df_fam_split1) # 245394,71
-
-geno_file = paste0(raw_data_path, 'AOU/lasso_map_multiallelic_plink')
-# snp_readBed(paste0(geno_file, '.bed'))
-obj.bigSNP = snp_attach(paste0(geno_file, '.rds'))
-map = obj.bigSNP$map[-3]
-names(map) = c("chr", "rsid", "pos", "a1", "a0")
-# Check matching
-cleaned_snp = snp_match(lasso_map_snp, map)
-# 19 variants have been matched; 0 were flipped and 4 were reversed.
-column_to_change = cleaned_snp %>% filter(rsid.ss != rsid) %>% pull(rsid)
-length(column_to_change) # N = 4
-genotype = obj.bigSNP$genotypes
-genotype_df = as.matrix(genotype[])[,] %>% as.data.frame()
-colnames(genotype_df) = map$rsid
-genotype_df_edit = genotype_df %>% 
-  mutate(across(.cols = all_of(column_to_change), .fns = ~ abs(. - 2), 
-                .names = "{.col}"))
-# Add fam info
-fam.order = as.data.table(obj.bigSNP$fam)
-genotype_df_fam_split2 = cbind(fam.order[,2], genotype_df_edit) %>% as.data.frame()
-colnames(genotype_df_fam_split2)[1] = "IID"
-dim(genotype_df_fam_split2) # 245394,42
-```
-
-```{r}
-# Combine together
-genotype_df_combined = genotype_df_fam_split1 %>% 
-  inner_join(genotype_df_fam_split2) %>% 
-  dplyr::rename("chr1:181033435:GT:G" = "chr1:181033435:G:GT",
-                "chr1:207629207:C:A" = "chr1:207629207:A:C",
-                "chr11:133897727:T:G" = "chr11:133897727:G:T",
-                "chr17:45355435:G:A" = "chr17:45355435:A:G",
-                "chr19:44696254:C:T" = "chr19:44696254:T:C",
-                "chr19:44836881:A:G" = "chr19:44836881:G:A",
-                "chr19:44864753:G:A" = "chr19:44864753:A:G",
-                "chr19:45027294:G:A" = "chr19:45027294:A:G",
-                "chr3:39467477:A:G" = "chr3:39467477:G:A",
-                "chr4:15715698:A:G" = "chr4:15715698:G:A",
-                "chr4:89715859:G:A" = "chr4:89715859:A:G",
-                "chr4:89910850:C:T" = "chr4:89910850:T:C",
-                "chr4:89953728:C:T" = "chr4:89953728:T:C",
-                "chr6:45449381:C:T" = "chr6:45449381:T:C",
-                "chr1:10730740:A:C" = "chr1:10730740:C:A",
-                "chr19:44549809:A:C" = "chr19:44549809:C:A",
-                "chr4:89831054:C:T" = "chr4:89831054:T:C",
-                "chr5:61040177:G:A" = "chr5:61040177:A:G") %>% 
-  select("IID", all_of(lasso_map_snp$rsid))
-dim(genotype_df_combined) # (245394,90)
-
-load(file = paste0(raw_data_path, "AOU/AFR/final_eligible_AOU_afr.rda"))
-load(file = paste0(raw_data_path, "AOU/AMR/final_eligible_AOU_amr.rda"))
-
-genotype_df_combined_sample = genotype_df_combined %>% 
-  filter(IID %in% final_eligible_AOU_afr$PatientID | 
-           IID %in% final_eligible_AOU_amr$PatientID) 
-dim(genotype_df_combined_sample) # (23449,90)
-missing_info = genotype_df_combined_sample %>% 
-  summarise_all(function(x) sum(is.na(x))) %>%  
-  gather(variable, missing_count) # max_missing = 2268
-lasso_snp = genotype_df_combined_sample %>% drop_na()
-names(lasso_snp)[1] = "PatientID"
-save(lasso_snp, file = paste0(raw_data_path, "AOU/lasso_snp.rda"))
-```
-
-## 5. PCA of samples
-### AMR
-```{r}
-load(file = paste0(raw_data_path, "modeling/AMR/sample_AMR_final.rda"))
-# get UCLA ATLAS patient ID for filtering
-amr_id = sample_AMR_final %>% 
-  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
-  as.data.frame() %>% mutate(IID = UniqueSampleId) %>% 
-  select(UniqueSampleId, IID)
-names(amr_id) = c("FID", "IID")
-write.table(amr_id, 
-            file = paste0(output_path, "AOU_validation/AMR/amr_id.txt"),
-            sep = "\t", quote = F, row.names = F, col.names = T)
+AOU_AMR_PRS = AOU_AMR_PRS %>% left_join(apoe_status, by = c("PatientID" = "PatientID"))
+AOU_AFR_PRS = AOU_AFR_PRS %>% left_join(apoe_status, by = c("PatientID" = "PatientID"))
 ```
 
 
 ```{r}
-AMR_snps = read.table(file = paste0(output_path, "AOU_validation/AMR/map_index.txt"), 
-                      header = F, sep = "\t", fill = T)
-AMR_snps_sep = AMR_snps %>% 
-  separate(V1, into = c("chr", "start", "ref", "alt"), 
-           sep = ":", remove = TRUE) %>% 
-  mutate(stop = as.character(as.numeric(start) + 1)) %>% unique() %>% 
-  select(chr, start, stop, ref, alt)
-dim(AMR_snps_sep) # (578675,5)
-# Write output for snp extraction on AOU server
-AMR_snps_sep1 = AMR_snps_sep %>% head(200000)
-AMR_snps_sep2 = AMR_snps_sep[200001:400000,]
-AMR_snps_sep3 = AMR_snps_sep[400001:578675,]
-write.table(AMR_snps_sep3, 
-            file = paste0(output_path, "AOU_validation/AMR/AMR_snps_sep3.txt"),
-            sep = "\t", quote = F, row.names = F, col.names = T)
+AOU_AMR_PRS = AOU_AMR_PRS %>% 
+  dplyr::rename("AD_PRS_Trans_indsig" = "AD_PRS_trans_indsig",
+                "AD_PRS_Trans_map" = "AD_PRS_trans_map",
+                "Stroke_PRS_indsig" = "STROKE_PRS_indsig",
+                "Stroke_PRS_map" = "STROKE_PRS_map")
+AOU_AFR_PRS = AOU_AFR_PRS %>%
+  dplyr::rename("AD_PRS_Trans_indsig" = "AD_PRS_trans_indsig",
+                "AD_PRS_Trans_map" = "AD_PRS_trans_map",
+                "Stroke_PRS_indsig" = "STROKE_PRS_indsig",
+                "Stroke_PRS_map" = "STROKE_PRS_map")
 ```
 
 
-### AFR
 ```{r}
-load(file = paste0(raw_data_path, "modeling/AFR/sample_AFR_final.rda"))
-# get UCLA ATLAS patient ID for filtering
-afr_id = sample_AFR_final %>% 
-  mutate(UniqueSampleId = as.character(UniqueSampleId)) %>% 
-  as.data.frame() %>% mutate(IID = UniqueSampleId) %>% 
-  select(UniqueSampleId, IID)
-names(afr_id) = c("FID", "IID")
-write.table(afr_id, 
-            file = paste0(output_path, "AOU_validation/AFR/afr_id.txt"),
-            sep = "\t", quote = F, row.names = F, col.names = T)
+# Save
+save(AOU_AMR_PRS, file = paste0(raw_data_path, "AOU/AOU_AMR_PRS.rda"))
+save(AOU_AFR_PRS, file = paste0(raw_data_path, "AOU/AOU_AFR_PRS.rda"))
+
+aou_geno_freq_full_SNP = genotype_df_fam %>% 
+  dplyr::rename("PatientID" = "sample.ID") 
+dim(aou_geno_freq_full_SNP) # dim = (7844, 7394)
+save(aou_geno_freq_full_SNP, file = paste0(raw_data_path, "AOU/aou_geno_freq_full_SNP.rda"))
 ```
-
-
-
 
