@@ -1,0 +1,255 @@
+---
+title: "4_Interpretation"
+author: "Joy_Fu"
+date: "2023-06-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+# lapply(paste('package:', names(sessionInfo()$otherPkgs), sep = ""),
+#        detach, character.only = TRUE, unload = TRUE)
+pacman::p_load(tidyverse, ggVennDiagram)
+raw_data_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/data/"
+output_path = "/Users/Mingzhou/Desktop/Projects/Dementia-prediction/output/"
+# Source in useful functions
+source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/functions.R")
+```
+
+
+# Part 1. Selected SNPs
+## 1. Read in data
+```{r}
+# read in txt files
+snps_AMR_map = read.table(file = paste0(output_path, "interpretation/AMR_SNP_map.txt"), 
+                          sep = "\t", header = T, stringsAsFactors = F)
+snps_AMR_map$ancestry = "AMR"
+snps_AFR_map = read.table(file = paste0(output_path, "interpretation/AFR_SNP_map.txt"), 
+                          sep = "\t", header = T, stringsAsFactors = F)
+snps_AFR_map$ancestry = "AFR"
+snps_AFR_map$STROKE = NA
+snps_EAS_map = read.table(file = paste0(output_path, "interpretation/EAS_SNP_map.txt"), 
+                          sep = "\t", header = T, stringsAsFactors = F)
+snps_EAS_map$ancestry = "EAS"
+snps_EAS_map$STROKE = NA
+snps_all_map = rbind(snps_AMR_map, snps_AFR_map, snps_EAS_map)
+dim(snps_all_map) # dim = (38,19)
+```
+
+## 2. Map to genes
+```{r}
+load(file = paste0(raw_data_path, "Interpretation/info_tbl/gene_info_full.rda"))
+load(file = paste0(raw_data_path, "Interpretation/info_tbl/snp_info_combine.rda"))
+# Read in all eqtl/ci data
+source("/Users/Mingzhou/Desktop/Projects/Dementia-prediction/code/read_FUMA.R")
+gene_info_short = gene_info_full %>% 
+  select(ensg, symbol, chr, start, end, type) %>% unique()
+```
+
+### AMR
+```{r}
+pos_map_genes = snps_AMR_map %>% group_by(nearestGene) %>% 
+  summarise(n_pos = n()) %>% select(nearestGene) %>% unique() %>% 
+  mutate(positional = "Yes") %>% dplyr::rename("symbol" = "nearestGene")
+```
+
+```{r}
+eqtl_map_pre = snps_AMR_map %>% filter(eqtlMapFilt == 1) %>% 
+  left_join(snp_info_combine) %>% 
+  select(uniqID, rsID, AD_EUR, AD_AFR, AD_trans, LBD, PD, PSP, LBD, STROKE)
+
+eqtl_PD_map = eqtl_map_pre %>% filter(PD == "x") %>% left_join(eqtl_PD)
+eqtl_PSP_map = eqtl_map_pre %>% filter(PSP == "x") %>% left_join(eqtl_PSP)
+
+eqtl_map = rbind(eqtl_PD_map, eqtl_PSP_map) %>% unique()
+eqtl_map_genes = eqtl_map %>% select(symbol, alignedDirection) %>% 
+  mutate(eqtl_pre = "Yes",
+         eqtl = paste0(eqtl_pre, " (", alignedDirection, ")")) %>% 
+  select(symbol, eqtl) %>% unique()
+```
+
+```{r}
+ci_map_pre = snps_AMR_map %>% filter(ciMapFilt == 1)
+
+ci_AFR_rsid = ci_map_pre %>% filter(AD_AFR == "x") %>% pull(rsID)
+ci_AFR_genes = AD_AFR_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_AFR_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_trans_rsid = ci_map_pre %>% filter(AD_trans == "x") %>% pull(rsID)
+ci_trans_genes = AD_trans_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_trans_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_PD_rsid = ci_map_pre %>% filter(PD == "x") %>% pull(rsID)
+ci_PD_genes = PD_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_PD_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_PSP_rsid = ci_map_pre %>% filter(PSP == "x") %>% pull(rsID)
+ci_PSP_genes = PSP_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_PSP_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_LBD_rsid = ci_map_pre %>% filter(LBD == "x") %>% pull(rsID)
+ci_LBD_genes = LBD_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_LBD_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+
+ci_map_full = rbind(ci_AFR_genes, ci_trans_genes, ci_PD_genes,
+                    ci_PSP_genes, ci_LBD_genes) %>% unique()
+ci_map_genes = ci_map_full %>% 
+  left_join(gene_info_short, by = c("genes" = "ensg")) %>% unique() %>% drop_na() %>% 
+  select(symbol) %>% unique() %>% mutate(ci = "Yes") %>% 
+  filter(symbol != "Y_RNA")
+```
+
+```{r}
+# combine together
+amr_genes_info = pos_map_genes %>% full_join(eqtl_map_genes) %>% 
+  full_join(ci_map_genes) %>% 
+  left_join(gene_info_short) %>% filter(!is.na(ensg)) %>% 
+  replace_na(list(positional = "No", eqtl = "No", ci = "No")) %>% 
+  arrange(chr, start)
+write.table(amr_genes_info, 
+            file = paste0(output_path, "interpretation/amr_genes_info.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+
+### AFR
+```{r}
+pos_map_genes = snps_AFR_map %>% group_by(nearestGene) %>% 
+  summarise(n_pos = n()) %>% select(nearestGene) %>% unique() %>% 
+  mutate(positional = "Yes") %>% dplyr::rename("symbol" = "nearestGene")
+```
+
+```{r}
+eqtl_map_pre = snps_AFR_map %>% filter(eqtlMapFilt == 1) %>% 
+  left_join(snp_info_combine) %>% 
+  select(uniqID, rsID, AD_EUR, AD_AFR, AD_trans, LBD, PD, PSP, LBD, STROKE)
+
+eqtl_AD_EUR_map = eqtl_map_pre %>% filter(AD_EUR == "x") %>% left_join(eqtl_EUR)
+eqtl_AD_AFR_map = eqtl_map_pre %>% filter(AD_AFR == "x") %>% left_join(eqtl_AFR)
+eqtl_AD_trans_map = eqtl_map_pre %>% filter(AD_trans == "x") %>% left_join(eqtl_Trans)
+eqtl_LBD_map = eqtl_map_pre %>% filter(LBD == "x") %>% left_join(eqtl_LBD)
+eqtl_PSP_map = eqtl_map_pre %>% filter(PSP == "x") %>% left_join(eqtl_PSP)
+
+eqtl_map = rbind(eqtl_AD_EUR_map, eqtl_AD_AFR_map, eqtl_AD_trans_map,
+                 eqtl_LBD_map, eqtl_PSP_map) %>% unique()
+eqtl_map_genes = eqtl_map %>% select(symbol, alignedDirection) %>% 
+  mutate(eqtl_pre = "Yes",
+         eqtl = paste0(eqtl_pre, " (", alignedDirection, ")")) %>% 
+  select(symbol, eqtl) %>% unique()
+```
+
+```{r}
+ci_map_pre = snps_AFR_map %>% filter(ciMapFilt == 1)
+
+ci_EUR_rsid = ci_map_pre %>% filter(AD_EUR == "x") %>% pull(rsID)
+ci_EUR_genes = AD_EUR_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_EUR_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_AFR_rsid = ci_map_pre %>% filter(AD_AFR == "x") %>% pull(rsID)
+ci_AFR_genes = AD_AFR_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_AFR_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_trans_rsid = ci_map_pre %>% filter(AD_trans == "x") %>% pull(rsID)
+ci_trans_genes = AD_trans_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_trans_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_PD_rsid = ci_map_pre %>% filter(PD == "x") %>% pull(rsID)
+ci_PD_genes = PD_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_PD_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_PSP_rsid = ci_map_pre %>% filter(PSP == "x") %>% pull(rsID)
+ci_PSP_genes = PSP_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_PSP_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+ci_LBD_rsid = ci_map_pre %>% filter(LBD == "x") %>% pull(rsID)
+ci_LBD_genes = LBD_ci %>% 
+  filter(sapply(strsplit(SNPs, ";"), 
+                function(x) any(x %in% ci_LBD_rsid))) %>% 
+  select(genes) %>% drop_na() %>% unique()
+
+ci_map_full = rbind(ci_EUR_genes, ci_AFR_genes, ci_trans_genes, ci_PD_genes,
+                    ci_PSP_genes, ci_LBD_genes) %>% unique()
+ci_map_genes = ci_map_full %>% 
+  left_join(gene_info_short, by = c("genes" = "ensg")) %>% unique() %>% drop_na() %>% 
+  select(symbol) %>% unique() %>% mutate(ci = "Yes") %>% 
+  filter(symbol != "Y_RNA")
+```
+
+```{r}
+# combine together
+afr_genes_info = pos_map_genes %>% full_join(eqtl_map_genes) %>% 
+  full_join(ci_map_genes) %>% 
+  left_join(gene_info_short) %>% filter(!is.na(ensg)) %>% 
+  replace_na(list(positional = "No", eqtl = "No", ci = "No")) %>% 
+  arrange(chr, start)
+write.table(afr_genes_info, 
+            file = paste0(output_path, "interpretation/afr_genes_info.txt"),
+            sep = "\t", quote = F, row.names = F, col.names = T)
+```
+
+## 3. Summary results
+```{r}
+amr_genes_info$ancestry = "AMR"
+afr_genes_info$ancestry = "AFR"
+
+genes_df_combined = rbind(amr_genes_info, afr_genes_info) %>% 
+  mutate(value = 1) %>% select(symbol, ancestry, value) %>% 
+  pivot_wider(names_from = ancestry, values_from = value, values_fill = 0)
+dim(genes_df_combined) # dim = (28,3)
+save(genes_df_combined, file = paste0(output_path, "interpretation/genes_df_combined.rda"))
+```
+
+# Part 2. Overlaps
+```{r}
+# load gene combined df (this df was created in Sup2_figures.Rmd)
+load(file = paste0(output_path, "interpretation/genes_df_combined.rda"))
+```
+
+```{r}
+# make a venn diagram
+venn_lst = list(
+  AMR = genes_df_combined %>% filter(AMR == 1) %>% pull(symbol),
+  AFR = genes_df_combined %>% filter(AFR == 1) %>% pull(symbol)
+)
+pdf(paste0(output_path, "shared_genes_AMR_AFR.pdf"), width = 8, height = 5)
+ggVennDiagram(venn_lst) +
+  scale_fill_gradient(low = "#F4FAFE", high = "#4981BF")
+dev.off()
+```
+
+```{r}
+overlap_all = genes_df_combined %>% filter(AMR == 1 & AFR == 1) %>% 
+  left_join(amr_genes_info) # N = 4 overlap
+overlap_all %>% pull(symbol) %>% paste(collapse = ", ")
+```
+
+```{r}
+genes_df_combined %>% filter(AMR == 1 & AFR == 0) %>% 
+  left_join(amr_genes_info) %>% pull(symbol) %>% paste(collapse = ", ")
+```
+
+```{r}
+genes_df_combined %>% filter(AMR == 0 & AFR == 1) %>% 
+  left_join(afr_genes_info) %>% pull(symbol) %>% paste(collapse = ", ")
+```
+
+
+
+
+
+
