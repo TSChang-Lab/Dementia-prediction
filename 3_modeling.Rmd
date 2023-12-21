@@ -414,7 +414,7 @@ desired_order = c("e4count", "PRS.EUR.indsig", "PRS.EUR.map", "PRS.AFR.indsig",
                   "PRS.neuro.indsig.combine", "PRS.neuro.map.combine",
                   "SNP.AD.indsig", "SNP.AD.map", "SNP.all.indsig",
                   "SNP.all.map")
-# desired_order = c("PRS.EUR.lead", "PRS.AFR.lead", "PRS.Trans.lead",
+# desired_order = c("PRS.EUR.lead", "PRS.AFR.lead", "PRS.trans.lead",
 #                   "PRS.AD.lead.combine", "PRS.neuro.lead.combine",
 #                   "SNP.AD.lead", "SNP.all.lead")
 ```
@@ -505,8 +505,8 @@ AFR_summary_tbl = rbind(prs_summary_tbl, snp_summary_tbl) %>%
 write.csv(AFR_summary_tbl, 
           paste0(output_path, "model_stats/AFR_summary_tbl.csv") ,
           row.names = FALSE)
-# write.csv(AMR_summary_tbl,
-#           paste0(output_path, "model_stats/AMR_summary_tbl_lead.csv") ,
+# write.csv(AFR_summary_tbl,
+#           paste0(output_path, "model_stats/AFR_summary_tbl_lead.csv") ,
 #           row.names = FALSE)
 ```
 
