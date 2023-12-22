@@ -32,12 +32,6 @@ snps_AFR_map = read.table(file = paste0(output_path, "interpretation/AFR_SNP_map
                           sep = "\t", header = T, stringsAsFactors = F)
 snps_AFR_map$ancestry = "AFR"
 snps_AFR_map$STROKE = NA
-snps_EAS_map = read.table(file = paste0(output_path, "interpretation/EAS_SNP_map.txt"), 
-                          sep = "\t", header = T, stringsAsFactors = F)
-snps_EAS_map$ancestry = "EAS"
-snps_EAS_map$STROKE = NA
-snps_all_map = rbind(snps_AMR_map, snps_AFR_map, snps_EAS_map)
-dim(snps_all_map) # dim = (38,19)
 ```
 
 ## 2. Map to genes
