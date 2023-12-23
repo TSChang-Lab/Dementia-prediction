@@ -320,6 +320,23 @@ table(aucpr_p_summary$prs_p)[1]/1000
 table(aucpr_p_summary$map_is_max)[1]/1000
 ```
 
+```{r}
+auc_p = combine_summary %>%  
+  select(mark, bootstrap, AUC) %>%
+  pivot_wider(names_from = mark, values_from = AUC)
+auc_p$max_prs = pmap_dbl(auc_p[prs_columns], max)
+auc_p$max_snp = pmap_dbl(auc_p[snp_columns], max)
+auc_p_summary = auc_p %>% 
+  select(bootstrap, e4count, max_prs, max_snp, SNP.all.map) %>%
+  mutate(prs_p = if_else(max_prs < SNP.all.map, 1, 0),
+         e4count_p = if_else(e4count < SNP.all.map, 1, 0),
+         map_is_max = if_else(max_snp <= SNP.all.map & max_prs < SNP.all.map, 1, 0)) 
+
+table(auc_p_summary$e4count_p)[1]/1000                          
+table(auc_p_summary$prs_p)[1]/1000
+table(auc_p_summary$map_is_max)[1]/1000
+```
+
 
 ## 4. Selected SNPs
 We ran bootstrapping (x1000) to get SNP map model (feature selected with 95%
@@ -683,6 +700,24 @@ table(aucpr_p_summary$e4count_p)[1]/1000
 table(aucpr_p_summary$prs_p)[1]/1000
 table(aucpr_p_summary$map_is_max)[1]/1000
 ```
+
+```{r}
+auc_p = combine_summary %>%  
+  select(mark, bootstrap, AUC) %>%
+  pivot_wider(names_from = mark, values_from = AUC)
+auc_p$max_prs = pmap_dbl(auc_p[prs_columns], max)
+auc_p$max_snp = pmap_dbl(auc_p[snp_columns], max)
+auc_p_summary = auc_p %>% 
+  select(bootstrap, e4count, max_prs, max_snp, SNP.all.map) %>%
+  mutate(prs_p = if_else(max_prs < SNP.all.map, 1, 0),
+         e4count_p = if_else(e4count < SNP.all.map, 1, 0),
+         map_is_max = if_else(max_snp <= SNP.all.map & max_prs < SNP.all.map, 1, 0)) 
+
+table(auc_p_summary$e4count_p)[1]/1000                          
+table(auc_p_summary$prs_p)[1]/1000
+table(auc_p_summary$map_is_max)[1]/1000
+```
+
 
 ## 4. Selected SNPs
 We ran bootstrapping (x1000) to get SNP map model (feature selected with 95%
